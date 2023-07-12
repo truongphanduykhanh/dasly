@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 
-import simpleDASreader
+from src import simpleDASreader
 
 
 def load_das(

@@ -29,7 +29,7 @@ import re
 import warnings
 from sympy import symbols, sympify
 import pandas as pd
-import h5pydict
+from src import h5pydict
 
 
 def load_DAS_files(filepaths, chIndex=None, samples=None, sensitivitySelect=0,
