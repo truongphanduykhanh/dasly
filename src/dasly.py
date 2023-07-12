@@ -29,6 +29,44 @@ class Dasly:
         self.events: np.ndarray = None
 
     @staticmethod
+    def infer_start_end(
+        start: str | datetime = None,
+        duration: int = None,
+        end: str | datetime = None
+    ) -> tuple[datetime, int, datetime]:
+        """_summary_
+
+        Args:
+            int (_type_): _description_
+            datetime (_type_): _description_
+            start (_type_, optional): _description_. Defaults to None
+            duration: int = None
+
+        Raises:
+            ValueError: _description_
+
+        Returns:
+            _type_: _description_
+        """
+        if (start is None) + (end is None) + (duration is None) != 1:
+            raise ValueError("The function accepts two and only two of (start,\
+                            end, duration)")
+
+        if isinstance(start, str):
+            start = datetime.strptime(start, '%Y%m%d %H%M%S')
+        if isinstance(end, str):
+            end = datetime.strptime(end, '%Y%m%d %H%M%S')
+
+        if end is None:
+            end = start + timedelta(seconds=duration)
+        elif duration is None:
+            duration = (end - start).seconds
+        elif start is None:
+            start = end - timedelta(seconds=duration)
+
+        return start, duration, end
+
+    @staticmethod
     def get_file_paths(
         folder_path: str,
         start: str | datetime = None,
@@ -47,23 +85,13 @@ class Dasly:
         Returns:
             list[str]: _description_
         """
-        # Check arguements
+        # Check and infer start, duration, end
         #######################################################################
-        if (start is None) + (end is None) + (duration is None) != 1:
-            raise ValueError("The function accepts two and only two of (start,\
-                            end, duration)")
-
-        if isinstance(start, str):
-            start = datetime.strptime(start, '%Y%m%d %H%M%S')
-        if isinstance(end, str):
-            end = datetime.strptime(end, '%Y%m%d %H%M%S')
-
-        if duration is None:
-            duration = (end - start).seconds
-        elif start is None:
-            start = end - timedelta(seconds=duration)
-        elif end is None:
-            end = start + timedelta(seconds=duration)
+        start, duration, end = Dasly.infer_start_end(
+            start=start,
+            duration=duration,
+            end=end
+        )
 
         # Get file paths
         #######################################################################
@@ -88,11 +116,11 @@ class Dasly:
             duration: int = None,
             end: str | datetime = None,
     ) -> None:
-        file_paths = self.get_file_paths(
+        start, duration, end = Dasly.infer_start_end(start, duration, end)
+        file_paths = Dasly.get_file_paths(
             folder_path=folder_path,
             start=start,
-            duration=duration,
-            end=end
+            duration=duration
         )
         self.file_paths = file_paths
         # Load files
@@ -257,7 +285,6 @@ class Dasly:
 
     def save_events(
             self,
-            events: np.ndarray,
             folder_path: str = '../data/interim/'
     ) -> None:
         """_summary_
@@ -267,7 +294,7 @@ class Dasly:
         """
         clustering = DBSCAN(eps=3, min_samples=2).fit(self.events)
         events_df = (
-            pd.DataFrame(events, columns=['Time', 'Channel'])
+            pd.DataFrame(self.events, columns=['Time', 'Channel'])
             .assign(Time=lambda df: len(self.signal) - df['Time'])
             .assign(Cluster=clustering.labels_)
             .groupby('Cluster')
