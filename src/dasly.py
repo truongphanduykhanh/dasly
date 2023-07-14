@@ -12,7 +12,6 @@ from scipy import signal
 from scipy.ndimage import gaussian_filter
 import sklearn
 from sklearn.cluster import DBSCAN
-import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -32,6 +31,8 @@ class Dasly:
         self.events: np.ndarray = None
         self.events_df: pd.DataFrame = None
         self.clustering: sklearn.cluster._dbscan.DBSCAN = None
+        self.frequency: int = None
+        self.duration: int = None
 
     @staticmethod
     def infer_start_end(
@@ -175,6 +176,8 @@ class Dasly:
             signal.index = pd.to_datetime(signal.index).time
         self.signal_raw = signal
         self.signal = signal
+        self.duration = duration
+        self.frequency = len(self.signal) / duration
 
     def high_pass_filter(
             self,
@@ -256,6 +259,7 @@ class Dasly:
         idx = self.signal.index[idx]
         signal_sample = pd.DataFrame(signal_sample, index=idx)
         self.signal = signal_sample
+        self.frequency = len(self.signal) / self.duration
 
     def heatmap(
             self,
@@ -367,23 +371,53 @@ class Dasly:
             event_space (float, optional): _description_. Defaults to 50.
         """
         for i in self.events_df.index:
+            print(i)
+            # Find time and space center
+            ###################################################################
             time_center = len(self.signal) - \
                 self.events_df.iloc[i].to_list()[0]
-            channel_center = self.events_df.iloc[i].to_list()[1]
-            time_name = (
-                self.signal
-                .index[time_center]
-                .to_pydatetime()
-                .strftime('%H%M%S')
-            )
-            channel_name = f'{channel_center:03d}'
+            space_center = self.events_df.iloc[i].to_list()[1]
+            # Move the region if the center is too close to the border
+            ###################################################################
+            if time_center - (event_time/2)*self.frequency < 0:
+                time_bottom = 0
+                time_top = event_time * self.frequency
+            elif time_center + (event_time/2)*self.frequency > \
+                    len(self.signal):
+                time_top = len(self.signal)
+                time_bottom = len(self.signal) - (event_time * self.frequency)
+            else:
+                time_bottom = time_center - (event_time/2)*self.frequency
+                time_top = time_center + (event_time/2)*self.frequency
+
+            if space_center - event_space/2 < 0:
+                space_left = 0
+                space_right = event_space
+            elif space_center + event_space/2 > self.signal.shape[1]:
+                space_right = self.signal.shape[1]
+                space_left = self.signal.shape[1] - event_space
+            else:
+                space_right = space_center - event_space/2
+                space_left = space_center + event_space/2
+            print(time_bottom, time_top)
+            print(space_left, space_right)
+            print()
+            # Find region around the center
+            ###################################################################
             data_cut = (
                 self.signal.iloc[
-                    time_center - 60: time_center + 60,
-                    channel_center - 20: channel_center + 20
+                    int(time_bottom): int(time_top),
+                    int(space_left): int(space_right)
                 ]
             )
+            # Save the data frame to file
+            ###################################################################
+            time_center_name = (
+                self.signal.index[time_center]
+                .strftime('%H%M%S')
+            )
+            channel_center_name = f'{space_center:03d}'
             data_cut.to_hdf(
-                f'{folder_path}{time_name}_{channel_name}.hdf5',
+                f'{folder_path}{time_center_name}_{channel_center_name}.hdf5',
                 key='abc'
             )
