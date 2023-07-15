@@ -171,7 +171,7 @@ class Dasly:
         #######################################################################
         signal = signal[start:end]  # take extact the range start-end
         signal = signal.iloc[:-1]  # drop the last record (new second already)
-        signal = signal.iloc[::-1]  # reverse the order of time, to plot easier
+        # signal = signal.iloc[::-1]  # reverse order of time, to plot easier
         if pd.Series(signal.index).dt.date.nunique() == 1:
             signal.index = pd.to_datetime(signal.index).time
         self.signal_raw = signal
@@ -280,10 +280,14 @@ class Dasly:
             threshold (float, optional): _description_. Defaults to 4e-8.
         """
         if binary:
-            ax = sns.heatmap(self.signal >= threshold, cmap='RdBu', center=0)
+            ax = sns.heatmap(
+                self.signal.iloc[::-1] >= threshold,
+                cmap='RdBu',
+                center=0
+            )
         else:
             ax = sns.heatmap(
-                self.signal,
+                self.signal.iloc[::-1],
                 cmap='RdBu',
                 center=0,
                 vmin=vmin,
@@ -324,7 +328,6 @@ class Dasly:
         clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(events)
         events_df = (
             pd.DataFrame(events, columns=['Time', 'Channel'])
-            .assign(Time=lambda df: self.signal.shape[0] - df['Time'])
             .assign(Cluster=clustering.labels_)
             .groupby('Cluster')
             .agg({
@@ -343,7 +346,7 @@ class Dasly:
         plt.figure(figsize=(fig_size[0] * 0.8, fig_size[1]))
         ax = sns.scatterplot(
             x=events[:, 1],  # xaxis of events - space
-            y=self.signal.shape[0] - events[:, 0],  # yaxis of events - time
+            y=events[:, 0],  # yaxis of events - time
             s=0.5,
             hue=clustering.labels_,
             palette='tab10',
@@ -351,7 +354,7 @@ class Dasly:
         )
         ax.set_xticks(self.ax.get_xticks())
         ax.set_xticklabels(self.ax.get_xticklabels(), rotation=90)
-        ax.set_yticks(self.signal.shape[0] - self.ax.get_yticks())
+        ax.set_yticks(self.ax.get_yticks()[::-1])
         ax.set_yticklabels(self.ax.get_yticklabels())
         plt.xlim(0, self.signal.shape[1])
         plt.ylim(0, self.signal.shape[0])
@@ -359,7 +362,7 @@ class Dasly:
     def save_events(
             self,
             folder_path: str = '../data/interim/',
-            event_time: float = 4,
+            event_time: float = 0.2,
             event_space: float = 50,
     ) -> None:
         """Save events in separated hdf5 files.
@@ -374,8 +377,7 @@ class Dasly:
             print(i)
             # Find time and space center
             ###################################################################
-            time_center = len(self.signal) - \
-                self.events_df.iloc[i].to_list()[0]
+            time_center = self.events_df.iloc[i].to_list()[0]
             space_center = self.events_df.iloc[i].to_list()[1]
             # Move the region if the center is too close to the border
             ###################################################################
@@ -397,10 +399,10 @@ class Dasly:
                 space_right = self.signal.shape[1]
                 space_left = self.signal.shape[1] - event_space
             else:
-                space_right = space_center - event_space/2
-                space_left = space_center + event_space/2
-            print(time_bottom, time_top)
-            print(space_left, space_right)
+                space_left = space_center - event_space/2
+                space_right = space_center + event_space/2
+            print(time_center, time_bottom, time_top)
+            print(space_center, space_left, space_right)
             print()
             # Find region around the center
             ###################################################################
