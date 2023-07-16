@@ -1,10 +1,11 @@
 """Provides end-to-end flow to load, analyze and visualize DAS data.
 """
 __author__ = 'khanhtruong'
-__date__ = '2022-06-14'
+__date__ = '2022-06-16'
 
 
 from datetime import datetime, timedelta
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ import seaborn as sns
 from src import simpleDASreader
 
 sns.set()
+warnings.filterwarnings('ignore', category=pd.io.pytables.PerformanceWarning)
 
 
 class Dasly:
@@ -374,7 +376,6 @@ class Dasly:
             event_space (float, optional): _description_. Defaults to 50.
         """
         for i in self.events_df.index:
-            print(i)
             # Find time and space center
             ###################################################################
             time_center = self.events_df.iloc[i].to_list()[0]
@@ -401,15 +402,12 @@ class Dasly:
             else:
                 space_left = space_center - event_space/2
                 space_right = space_center + event_space/2
-            print(time_center, time_bottom, time_top)
-            print(space_center, space_left, space_right)
-            print()
             # Find region around the center
             ###################################################################
             data_cut = (
                 self.signal.iloc[
-                    int(time_bottom): int(time_top),
-                    int(space_left): int(space_right)
+                    round(time_bottom): round(time_top),
+                    round(space_left): round(space_right)
                 ]
             )
             # Save the data frame to file
@@ -418,8 +416,30 @@ class Dasly:
                 self.signal.index[time_center]
                 .strftime('%H%M%S')
             )
-            channel_center_name = f'{space_center:03d}'
-            data_cut.to_hdf(
-                f'{folder_path}{time_center_name}_{channel_center_name}.hdf5',
-                key='abc'
-            )
+            space_center_name = f'{space_center:03d}'
+            file_name = f'{folder_path}{time_center_name}_\
+                {space_center_name}.hdf5'
+            data_cut.to_hdf(file_name, key='abc')
+
+
+if __name__ == "__main__":
+
+    periods: list[tuple[int | str, int | str]] = [
+        # (103030, 103055),
+        # (103540, 104010),
+        # (104730, 105911),
+        # (105935, 110455),
+    ]
+    for period in periods:
+        das = Dasly()
+        das.load_data(
+            folder_path='../data/raw/Campus_test_20230628_2kHz/',
+            start=f'20230628 {period[0]}',
+            end=f'20230628 {period[1]}'
+        )
+        das.high_pass_filter()
+        das.low_pass_filter()
+        das.decimate()
+        das.gauss_filter()
+        das.detect_events()
+        das.save_events()
