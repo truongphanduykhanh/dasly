@@ -312,7 +312,8 @@ class Dasly:
             self,
             threshold: float = 4e-8,
             eps: float = 3,
-            min_samples: int = 2
+            min_samples: int = 2,
+            plot: bool = True
     ) -> None:
         """Detect events.
 
@@ -320,6 +321,7 @@ class Dasly:
             threshold (float, optional): _description_. Defaults to None.
             eps (float, optional): _description_. Defaults to 3.
             min_samples (int, optional): _description_. Defaults to 2.
+            plot (bool, optional): _description_. Defaults to True.
 
         Raises:
             ValueError: Must set threshold if not yet plot heatmap binary.
@@ -344,22 +346,23 @@ class Dasly:
         self.clustering = clustering
         # Plot events
         #######################################################################
-        fig_size = plt.rcParams.get('figure.figsize')
-        plt.figure(figsize=(fig_size[0] * 0.8, fig_size[1]))
-        ax = sns.scatterplot(
-            x=events[:, 1],  # xaxis of events - space
-            y=events[:, 0],  # yaxis of events - time
-            s=0.5,
-            hue=clustering.labels_,
-            palette='tab10',
-            legend='auto'
-        )
-        ax.set_xticks(self.ax.get_xticks())
-        ax.set_xticklabels(self.ax.get_xticklabels(), rotation=90)
-        ax.set_yticks(self.ax.get_yticks()[::-1])
-        ax.set_yticklabels(self.ax.get_yticklabels())
-        plt.xlim(0, self.signal.shape[1])
-        plt.ylim(0, self.signal.shape[0])
+        if plot:
+            fig_size = plt.rcParams.get('figure.figsize')
+            plt.figure(figsize=(fig_size[0] * 0.8, fig_size[1]))
+            ax = sns.scatterplot(
+                x=events[:, 1],  # xaxis of events - space
+                y=events[:, 0],  # yaxis of events - time
+                s=0.5,
+                hue=clustering.labels_,
+                palette='tab10',
+                legend='auto'
+            )
+            ax.set_xticks(self.ax.get_xticks())
+            ax.set_xticklabels(self.ax.get_xticklabels(), rotation=90)
+            ax.set_yticks(self.ax.get_yticks()[::-1])
+            ax.set_yticklabels(self.ax.get_yticklabels())
+            plt.xlim(0, self.signal.shape[1])
+            plt.ylim(0, self.signal.shape[0])
 
     def save_events(
             self,
@@ -417,29 +420,104 @@ class Dasly:
                 .strftime('%H%M%S')
             )
             space_center_name = f'{space_center:03d}'
-            file_name = f'{folder_path}{time_center_name}_\
-                {space_center_name}.hdf5'
+            file_name = f'{folder_path}{time_center_name}_{space_center_name}.hdf5'
             data_cut.to_hdf(file_name, key='abc')
+
+
+def split_period(
+        period: tuple[str | int, str | int],
+        time_span: int = 10,
+        date: str = '20230628'
+) -> list[tuple[datetime, datetime]]:
+    """Split a period into many smaller periods.
+
+    Args:
+        periods (tuple[str | int, str | int]: (start, end) of period. Format
+            '%H%M%S'.
+        time_span (int, optional): Period duration in seconds to split.
+            Defaults to 10.
+        date (str, optional): Date of the data. Format '%Y%m%d'. Defaults to
+            '20230628'.
+
+    Returns:
+        list[tuple[datetime, datetime]]: List of all smaller periods.
+    """
+    # Convert start, end to datetime
+    ###########################################################################
+    start = period[0]
+    end = period[1]
+    if start > end:
+        raise ValueError('start must be smaller or equal to end.')
+    start = datetime.strptime(f'{date} {start}', '%Y%m%d %H%M%S')
+    end = datetime.strptime(f'{date} {end}', '%Y%m%d %H%M%S')
+    # Split the duration into many smaller durations
+    ###########################################################################
+    duration = (end - start).seconds
+    number_split = duration // time_span
+    remaining = duration % time_span
+    duration_split = [time_span] * number_split + [remaining]
+    # Identify the start, end of each duration
+    ###########################################################################
+    periods = []
+    for i in duration_split:
+        end = start + timedelta(seconds=i)
+        period_i = (start, end)
+        periods.append(period_i)
+        start = end
+    return periods
+
+
+def split_periods(
+        periods: list[tuple[datetime, datetime]],
+        time_span: int = 10,
+        date: str = '20230628'
+) -> list[tuple[datetime, datetime]]:
+    """Split periods into many smaller periods.
+
+    Args:
+        period (list[tuple[datetime, datetime]]): (start, end) of periods.
+            Format '%H%M%S'.
+        time_span (int, optional): Period duration in seconds to split.
+            Defaults to 10.
+        date (str, optional): Date of the data. Format '%Y%m%d'. Defaults to
+            '20230628'.
+
+    Returns:
+        list[tuple[datetime, datetime]]: List of all smaller periods.
+    """
+    periods_split = []
+    for period in periods:
+        periods_i = split_period(
+            period=period,
+            time_span=time_span,
+            date=date
+        )
+        periods_split.extend(periods_i)
+    return periods_split
 
 
 if __name__ == "__main__":
 
-    periods: list[tuple[int | str, int | str]] = [
-        # (103030, 103055),
+    periods = [
+        (103030, 103055),
         # (103540, 104010),
         # (104730, 105911),
         # (105935, 110455),
     ]
-    for period in periods:
+    periods_split = split_periods(periods=periods, time_span=10)
+
+    # Run the flow at every small period
+    ###########################################################################
+    for period in periods_split:
         das = Dasly()
         das.load_data(
             folder_path='../data/raw/Campus_test_20230628_2kHz/',
-            start=f'20230628 {period[0]}',
-            end=f'20230628 {period[1]}'
+            start=period[0],
+            end=period[1]
         )
         das.high_pass_filter()
         das.low_pass_filter()
         das.decimate()
         das.gauss_filter()
-        das.detect_events()
+        das.detect_events(plot=False)
         das.save_events()
