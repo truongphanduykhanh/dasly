@@ -92,3 +92,6 @@ target/
 # Test notenook
 test.ipynb
 0.0-test.ipynb
+
+*.ckpt
+/notebooks/lightning_logs

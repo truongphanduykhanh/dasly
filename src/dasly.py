@@ -30,6 +30,7 @@ class Dasly:
         self.file_paths: list[str] = None
         self.signal_raw: pd.DataFrame = None
         self.signal: pd.DataFrame = None
+        self.signal_decimate: pd.DataFrame = None
         self.events: np.ndarray = None
         self.events_df: pd.DataFrame = None
         self.clustering: sklearn.cluster._dbscan.DBSCAN = None
@@ -260,6 +261,7 @@ class Dasly:
         idx = slice(0, len(self.signal.index), int(dt_out/dt))
         idx = self.signal.index[idx]
         signal_sample = pd.DataFrame(signal_sample, index=idx)
+        self.signal_decimate = signal_sample
         self.signal = signal_sample
         self.frequency = len(self.signal) / self.duration
 
@@ -283,7 +285,7 @@ class Dasly:
         """
         if binary:
             ax = sns.heatmap(
-                self.signal.iloc[::-1] >= threshold,
+                np.abs(self.signal.iloc[::-1]) >= threshold,
                 cmap='RdBu',
                 center=0
             )
@@ -311,8 +313,8 @@ class Dasly:
     def detect_events(
             self,
             threshold: float = 4e-8,
-            eps: float = 3,
-            min_samples: int = 2,
+            eps: float = 100,
+            min_samples: int = 100,
             plot: bool = True
     ) -> None:
         """Detect events.
@@ -328,14 +330,14 @@ class Dasly:
         """
         # Detect events
         #######################################################################
-        events = np.argwhere(self.signal.values >= threshold)
+        events = np.argwhere(np.abs(self.signal.values) >= threshold)
         clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(events)
         events_df = (
             pd.DataFrame(events, columns=['Time', 'Channel'])
             .assign(Cluster=clustering.labels_)
             .groupby('Cluster')
             .agg({
-                'Time': 'mean',
+                'Time': 'min',
                 'Channel': ['mean', 'count']})
             .round(0)
             .astype(int)
@@ -349,13 +351,17 @@ class Dasly:
         if plot:
             fig_size = plt.rcParams.get('figure.figsize')
             plt.figure(figsize=(fig_size[0] * 0.8, fig_size[1]))
+            # if max(clustering.labels_) > 15:
+            #     legend = False
+            # else:
+            #     legend = 'auto'
             ax = sns.scatterplot(
                 x=events[:, 1],  # xaxis of events - space
                 y=events[:, 0],  # yaxis of events - time
                 s=0.5,
                 hue=clustering.labels_,
                 palette='tab10',
-                legend='auto'
+                # legend=legend
             )
             ax.set_xticks(self.ax.get_xticks())
             ax.set_xticklabels(self.ax.get_xticklabels(), rotation=90)
@@ -378,23 +384,36 @@ class Dasly:
             event_time (float, optional): _description_. Defaults to 4.
             event_space (float, optional): _description_. Defaults to 50.
         """
-        for i in self.events_df.index:
+        cluster = self.events_df.index.to_list()
+        if -1 in cluster:
+            cluster.remove(-1)
+        for i in cluster:
             # Find time and space center
             ###################################################################
-            time_center = self.events_df.iloc[i].to_list()[0]
-            space_center = self.events_df.iloc[i].to_list()[1]
+            time_center = self.events_df.loc[i]['Time']
+            space_center = self.events_df.loc[i]['Channel']
             # Move the region if the center is too close to the border
             ###################################################################
-            if time_center - (event_time/2)*self.frequency < 0:
+            # if time_center - (event_time/2)*self.frequency < 0:
+            #     time_bottom = 0
+            #     time_top = event_time * self.frequency
+            # elif time_center + (event_time/2)*self.frequency > \
+            #         len(self.signal):
+            #     time_top = len(self.signal)
+            #     time_bottom = len(self.signal) - (event_time * self.frequency)
+            # else:
+            #     time_bottom = time_center - (event_time/2)*self.frequency
+            #     time_top = time_center + (event_time/2)*self.frequency
+
+            if time_center < 0:
                 time_bottom = 0
                 time_top = event_time * self.frequency
-            elif time_center + (event_time/2)*self.frequency > \
-                    len(self.signal):
+            elif time_center > len(self.signal):
                 time_top = len(self.signal)
                 time_bottom = len(self.signal) - (event_time * self.frequency)
             else:
-                time_bottom = time_center - (event_time/2)*self.frequency
-                time_top = time_center + (event_time/2)*self.frequency
+                time_bottom = time_center - (1/8) * event_time * self.frequency
+                time_top = time_center + (7/8) * event_time * self.frequency
 
             if space_center - event_space/2 < 0:
                 space_left = 0
@@ -408,7 +427,7 @@ class Dasly:
             # Find region around the center
             ###################################################################
             data_cut = (
-                self.signal.iloc[
+                self.signal_decimate.iloc[
                     round(time_bottom): round(time_top),
                     round(space_left): round(space_right)
                 ]
@@ -420,7 +439,8 @@ class Dasly:
                 .strftime('%H%M%S')
             )
             space_center_name = f'{space_center:03d}'
-            file_name = f'{folder_path}{time_center_name}_{space_center_name}.hdf5'
+            cluster_name = f'{i:02d}'
+            file_name = f'{folder_path}{time_center_name}_{space_center_name}_{cluster_name}.hdf5'
             data_cut.to_hdf(file_name, key='abc')
 
 
@@ -499,7 +519,7 @@ def split_periods(
 if __name__ == "__main__":
 
     periods = [
-        (103030, 103055),
+        (111545, 111630),  # first drop 111551
         # (103540, 104010),
         # (104730, 105911),
         # (105935, 110455),
@@ -518,6 +538,13 @@ if __name__ == "__main__":
         das.high_pass_filter()
         das.low_pass_filter()
         das.decimate()
-        das.gauss_filter()
-        das.detect_events(plot=False)
+        das.signal = das.signal.iloc[200:, 50:]
+        das.signal_decimate = das.signal_decimate.iloc[200:, 50:]
+        # das.gauss_filter()
+        das.detect_events(
+            plot=False,
+            threshold=5e-8,
+            eps=50,
+            min_samples=50
+        )
         das.save_events()
