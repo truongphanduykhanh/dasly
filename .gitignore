@@ -95,3 +95,4 @@ test.ipynb
 
 *.ckpt
 /notebooks/lightning_logs
+*.pt

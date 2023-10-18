@@ -14,6 +14,7 @@ from scipy.ndimage import gaussian_filter
 import sklearn
 from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
+from matplotlib import colors
 import seaborn as sns
 
 from src import simpleDASreader
@@ -34,14 +35,16 @@ class Dasly:
         self.events: np.ndarray = None
         self.events_df: pd.DataFrame = None
         self.clustering: sklearn.cluster._dbscan.DBSCAN = None
-        self.frequency: int = None
+        self.sampling_rate: int = None
         self.duration: int = None
+        self.data_type: str = None
 
     @staticmethod
-    def infer_start_end(
+    def infer_time(
         start: str | datetime = None,
         duration: int = None,
-        end: str | datetime = None
+        end: str | datetime = None,
+        format: str = '%Y%m%d %H%M%S'
     ) -> tuple[datetime, int, datetime]:
         """Infer start if duration and end are provided. Infer duration if
         start and end are provided. Infer end if start and duration are
@@ -49,11 +52,15 @@ class Dasly:
 
         Args:
             start (str | datetime, optional): Start time. If string, must be in
-                format YYMMDD HHMMSS. Defaults to None.
+                format YYMMDD HHMMSS, specify in argument format otherwise.
+                Defaults to None.
             duration (int, optional): Duration of the time in seconds. Defaults
                 to None.
             end (str | datetime, optional): End time. If string, must be in
-                format YYMMDD HHMMSS. Defaults to None.
+                format YYMMDD HHMMSS, specify in argument format otherwise.
+                Defaults to None.
+            format (str, optional): Format of start, end. Defaults to
+                '%Y%m%d %H%M%S'.
 
         Raises:
             ValueError: The function accepts two and only two out of three
@@ -70,9 +77,9 @@ class Dasly:
         # Transform to datetime type if string is inputted
         #######################################################################
         if isinstance(start, str):
-            start = datetime.strptime(start, '%Y%m%d %H%M%S')
+            start = datetime.strptime(start, format)
         if isinstance(end, str):
-            end = datetime.strptime(end, '%Y%m%d %H%M%S')
+            end = datetime.strptime(end, format)
         # Infer end or duration or start
         #######################################################################
         if end is None:
@@ -108,7 +115,7 @@ class Dasly:
         """
         # Check and infer start, duration, end
         #######################################################################
-        start, duration, end = Dasly.infer_start_end(
+        start, duration, end = Dasly.infer_time(
             start=start,
             duration=duration,
             end=end
@@ -150,7 +157,7 @@ class Dasly:
             end (str | datetime, optional): End time. If string, must be in
                 format YYMMDD HHMMSS. Defaults to None.
         """
-        start, duration, end = Dasly.infer_start_end(start, duration, end)
+        start, duration, end = Dasly.infer_time(start, duration, end)
         file_paths = Dasly.get_file_paths(
             folder_path=folder_path,
             start=start,
@@ -164,7 +171,7 @@ class Dasly:
             chIndex=None,  # default
             samples=None,  # default
             sensitivitySelect=0,  # default
-            integrate=True,  # default
+            integrate=False,  # change to False
             unwr=True,  # change to True
             spikeThr=None,  # default
             userSensitivity=None  # default
@@ -179,8 +186,9 @@ class Dasly:
             signal.index = pd.to_datetime(signal.index).time
         self.signal_raw = signal
         self.signal = signal
+        self.data_type = 'float'
         self.duration = duration
-        self.frequency = len(self.signal) / duration
+        self.sampling_rate = len(self.signal) / duration
 
     def high_pass_filter(
             self,
@@ -263,14 +271,166 @@ class Dasly:
         signal_sample = pd.DataFrame(signal_sample, index=idx)
         self.signal_decimate = signal_sample
         self.signal = signal_sample
-        self.frequency = len(self.signal) / self.duration
+        self.sampling_rate = len(self.signal) / self.duration
+
+    def sample(
+            self,
+            group_factor: int
+    ) -> pd.DataFrame:
+        """Take sampling according to time (rows).
+
+        Args:
+            group_factor (int): Factor would like to take sampling. Ex: value 5
+                will take average of every 5 rows
+        """
+        # create antificial groups
+        groups = np.arange(len(self.signal_raw)) // group_factor
+        # calculate means by group
+        signal = self.signal_raw.groupby(groups).mean()
+        # take correct index
+        signal.index = self.signal_raw.iloc[::group_factor, :].index
+        self.signal = signal
+        return signal
+
+    def binary_filter(
+            self,
+            threshold: float | str = 'auto',
+            inplace: bool = True
+    ) -> None:
+        """Transform data to binary. First take absolute value. Then map to 1
+            if greater than or equal to threshold, 0 otherwise.
+
+        Args:
+            threshold (float | str, optional): If 'auto', take 95th percentile.
+                Defaults to 'auto'.
+            inplace (bool, optional): If overwite self.signal. Defaults to
+                True.
+        """
+        if threshold == 'auto':
+            threshold = np.quantile(np.abs(self.signal), 0.95)
+        print(f'Threshold {threshold:.3g}')
+        signal_binary = (np.abs(self.signal) >= threshold).astype(int)
+        if inplace:
+            self.signal = signal_binary
+        return signal_binary
+
+    def greyscale_filter(self, inplace: bool = True) -> None:
+        """Transform data to greyscale 0 to 255 using min-max scalling.
+
+        Args:
+            inplace (bool, optional): If overwite self.signal. Defaults to
+                True.
+        """
+        # min-max normalization
+        signal_grey = np.abs(self.signal)
+        signal_grey = ((signal_grey - np.min(signal_grey)) /
+                       (np.max(signal_grey) - np.min(signal_grey)) * 255)
+        signal_grey = signal_grey.round(0).astype(np.uint8)
+        if inplace:
+            self.signal = signal_grey
+        return signal_grey
+
+    def check_data_type(self) -> str:
+        """Check data type
+
+        Returns:
+            str: Either ['float', 'greyscale', 'binary']
+        """
+        if np.min(self.signal == 0) & np.max(self.signal == 255):
+            return 'greyscale'
+        elif self.signal.isin([0, 1]).all().all():
+            return 'binary'
+        else:
+            return 'float'
 
     def heatmap(
             self,
+            color_type: str = 'auto',
+            vmin: float | str = 'auto',
+            vmax: float | str = 'auto',
             binary: bool = False,
-            vmin: float = -1e-7,
-            vmax: float = 1e-7,
-            threshold: float = 4e-8
+            threshold: float | str = 'auto',
+            greyscale: bool = False,
+            time_precision: str = 'seconds'
+    ) -> None:
+        """Plot heatmap. There are two options:
+        1. Plot signal data frame with as-is float values.
+        2. Plot signal data frame with transformed binary values. Should
+            provide an accompanying threshold, take 95th percentile otherwise.
+
+        Args:
+            vmin (float | str, optional): Values to anchor the colormap. 'auto'
+                will take negative 95th percentile. Defaults to 'auto'.
+            vmax (float | str, optional): Values to anchor the colormap. 'auto'
+                will take 95th percentile. Defaults to 'auto'.
+            binary (bool, optional): If plot binary. Defaults to False.
+            threshold (float | str, optional): Threshold to convert to binary.
+                Defaults to 'auto'.
+            greyscale (bool, optional): If plot greyscale. Defaults to False.
+            time_precision (str, optional): Precision of time in y-axis.
+                Can be in ['auto', 'hours', 'minutes', 'seconds',
+                'milliseconds', 'microseconds']. Defaults to 'seconds'.
+        """
+        data_type = self.check_data_type()
+        if color_type == 'auto':
+            color_type = data_type
+
+        if color_type != data_type:
+            warnings.warn(f"""The data is in {data_type}, not valid for
+                          {color_type}.""")
+
+        if (color_type == 'binary') & :
+            data = self.binary_filter(threshold=threshold, inplace=False)
+            cmap = 'gray'
+            vmin = 0
+            vmax = 1
+        elif greyscale:
+            data = self.greyscale_filter(inplace=False)
+            cmap = 'viridis'
+            if (vmin == 'auto') or (vmax == 'auto'):
+                percentile = np.quantile(np.abs(data), 0.95)
+                vmin = 0
+                vmax = percentile
+                print(f'Heatmap with vmin {vmin:.3g}, vmax {vmax:.3g}')
+        else:
+            data = self.signal
+            cmap = 'RdBu'
+            if (vmin == 'auto') or (vmax == 'auto'):
+                percentile = np.quantile(np.abs(data), 0.95)
+                vmin = - percentile
+                vmax = percentile
+                print(f'Heatmap with vmin {vmin:.3g}, vmax {vmax:.3g}')
+        norm = colors.TwoSlopeNorm(
+            vmin=vmin,
+            vmax=vmax,
+            vcenter=(vmin + vmax) / 2
+        )
+        plt.imshow(
+            X=data.iloc[::-1],
+            aspect=data.shape[1] / data.shape[0],  # square
+            cmap=cmap,
+            norm=norm,
+            interpolation='none',  # no interpolation
+            # to see the last values of x-axis
+            extent=[0, data.shape[1], 0, data.shape[0]]
+        )
+        # adjust the y-axis to time
+        y = self.signal.iloc[::-1].index  # values of y-axis
+        y = [i.isoformat(timespec=time_precision) for i in y]
+        ny = len(y)
+        no_labels = 15  # how many labels to see on axis y
+        step_y = int(ny / (no_labels - 1))  # step between consecutive labels
+        y_positions = np.arange(0, ny, step_y)  # pixel count at label position
+        y_labels = y[::step_y]  # labels you want
+        plt.yticks(y_positions, y_labels)
+
+    def heatmap_old(
+            self,
+            vmin: float | str = 'auto',
+            vmax: float | str = 'auto',
+            binary: bool = False,
+            threshold: float | str = 'auto',
+            sampling: bool = True
     ) -> None:
         """Plot heatmap. There are two options:
         1. Plot signal data frame with as-is float values.
@@ -278,18 +438,36 @@ class Dasly:
             an accompanying threshold.
 
         Args:
+            vmin (float | str, optional): _description_. Defaults to 'auto'.
+            vmax (float | str, optional): _description_. Defaults to 'auto'.
             binary (bool, optional): _description_. Defaults to False.
-            vmin (float, optional): _description_. Defaults to -1e-7.
-            vmax (float, optional): _description_. Defaults to 1e-7.
-            threshold (float, optional): _description_. Defaults to 4e-8.
+            threshold (float | str, optional): _description_. Defaults to 4e-8.
+            sampling (bool, optional): _description_. Defaults to True.
         """
+        # if the data is too large, sampling the data to plot faster
+        # 10**6 cells are plotted roughly in 1 second
+        # below code takes sampling if the data is more than 10*(10**6) rows
+        # i.e. more than 10 seconds to plot
+        relative_data_size = self.signal.count().sum() / (10*(10**6))
+        if sampling and (relative_data_size > 1):
+            group_factor = int(np.ceil(relative_data_size))
+            self.sample(group_factor=group_factor)
+            print(f'The data is sampled with factor {group_factor}.')
         if binary:
+            if threshold == 'auto':
+                threshold = np.quantile(np.abs(self.signal), 0.95)
+                print(f'Binary heatmap with threshold {threshold:.3g}')
             ax = sns.heatmap(
                 np.abs(self.signal.iloc[::-1]) >= threshold,
                 cmap='RdBu',
                 center=0
             )
         else:
+            if vmin == 'auto':
+                percentile = np.quantile(np.abs(self.signal), 0.95)
+                vmin = - percentile
+                vmax = percentile
+                print(f'Heatmap with vmin {vmin:.9g}, vmax {vmax:.9g}')
             ax = sns.heatmap(
                 self.signal.iloc[::-1],
                 cmap='RdBu',
@@ -299,14 +477,37 @@ class Dasly:
             )
         self.ax = ax
 
-    def gauss_filter(self, sigma: float = 10) -> None:
+    def gauss_filter(
+            self,
+            beta: float = 20,  # 20 channels
+            beta_alpha_factor: float = 25,  # 1 channel equals 1/25 seconds
+            alpha: float = None
+    ) -> None:
         """Apply 2d Gaussian filter.
 
         Args:
-            sigma (float, optional): Standard deviation of the 2d Gaussian.
-                Defaults to 10.
+            beta (float, optional): Sigma along the column axis (channel).
+                Defaults to 20.
+            beta_alpha_factor (float, optional): 1 channel equals
+                beta_alpha_factor seconds. Defaults to 25.
+            alpha (float, optional): Sigma along the row axis (time).
+                Defaults to None.
+
+        Raises:
+            ValueError: The function accepts two and only two out of three \
+                (alpha, beta, beta_alpha_factor)
         """
-        gauss_df = gaussian_filter(np.abs(self.signal), sigma=sigma)
+        # Check number of argument
+        #######################################################################
+        if (alpha is None) + (beta is None) + (beta_alpha_factor is None) != 1:
+            raise ValueError("The function accepts two and only two out of \
+                             three (alpha, beta, beta_alpha_factor)")
+        frequency = len(self.signal) / self.duration
+        if alpha is None:
+            alpha = beta / beta_alpha_factor * frequency
+        if beta is None:
+            beta = alpha * beta_alpha_factor / frequency
+        gauss_df = gaussian_filter(np.abs(self.signal), sigma=(alpha, beta))
         gauss_df = pd.DataFrame(gauss_df, index=self.signal.index)
         self.signal = gauss_df
 
@@ -407,13 +608,13 @@ class Dasly:
 
             if time_center < 0:
                 time_bottom = 0
-                time_top = event_time * self.frequency
+                time_top = event_time * self.sampling_rate
             elif time_center > len(self.signal):
                 time_top = len(self.signal)
-                time_bottom = len(self.signal) - (event_time * self.frequency)
+                time_bottom = len(self.signal) - (event_time * self.sampling_rate)
             else:
-                time_bottom = time_center - (1/8) * event_time * self.frequency
-                time_top = time_center + (7/8) * event_time * self.frequency
+                time_bottom = time_center - (1/8) * event_time * self.sampling_rate
+                time_top = time_center + (7/8) * event_time * self.sampling_rate
 
             if space_center - event_space/2 < 0:
                 space_left = 0
