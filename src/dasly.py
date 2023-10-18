@@ -314,7 +314,7 @@ class Dasly:
             self.signal = signal_binary
         return signal_binary
 
-    def greyscale_filter(self, inplace: bool = True) -> None:
+    def grey_filter(self, inplace: bool = True) -> None:
         """Transform data to greyscale 0 to 255 using min-max scalling.
 
         Args:
@@ -329,153 +329,6 @@ class Dasly:
         if inplace:
             self.signal = signal_grey
         return signal_grey
-
-    def check_data_type(self) -> str:
-        """Check data type
-
-        Returns:
-            str: Either ['float', 'greyscale', 'binary']
-        """
-        if np.min(self.signal == 0) & np.max(self.signal == 255):
-            return 'greyscale'
-        elif self.signal.isin([0, 1]).all().all():
-            return 'binary'
-        else:
-            return 'float'
-
-    def heatmap(
-            self,
-            color_type: str = 'auto',
-            vmin: float | str = 'auto',
-            vmax: float | str = 'auto',
-            binary: bool = False,
-            threshold: float | str = 'auto',
-            greyscale: bool = False,
-            time_precision: str = 'seconds'
-    ) -> None:
-        """Plot heatmap. There are two options:
-        1. Plot signal data frame with as-is float values.
-        2. Plot signal data frame with transformed binary values. Should
-            provide an accompanying threshold, take 95th percentile otherwise.
-
-        Args:
-            vmin (float | str, optional): Values to anchor the colormap. 'auto'
-                will take negative 95th percentile. Defaults to 'auto'.
-            vmax (float | str, optional): Values to anchor the colormap. 'auto'
-                will take 95th percentile. Defaults to 'auto'.
-            binary (bool, optional): If plot binary. Defaults to False.
-            threshold (float | str, optional): Threshold to convert to binary.
-                Defaults to 'auto'.
-            greyscale (bool, optional): If plot greyscale. Defaults to False.
-            time_precision (str, optional): Precision of time in y-axis.
-                Can be in ['auto', 'hours', 'minutes', 'seconds',
-                'milliseconds', 'microseconds']. Defaults to 'seconds'.
-        """
-        data_type = self.check_data_type()
-        if color_type == 'auto':
-            color_type = data_type
-
-        if color_type != data_type:
-            warnings.warn(f"""The data is in {data_type}, not valid for
-                          {color_type}.""")
-
-        if (color_type == 'binary') & :
-            data = self.binary_filter(threshold=threshold, inplace=False)
-            cmap = 'gray'
-            vmin = 0
-            vmax = 1
-        elif greyscale:
-            data = self.greyscale_filter(inplace=False)
-            cmap = 'viridis'
-            if (vmin == 'auto') or (vmax == 'auto'):
-                percentile = np.quantile(np.abs(data), 0.95)
-                vmin = 0
-                vmax = percentile
-                print(f'Heatmap with vmin {vmin:.3g}, vmax {vmax:.3g}')
-        else:
-            data = self.signal
-            cmap = 'RdBu'
-            if (vmin == 'auto') or (vmax == 'auto'):
-                percentile = np.quantile(np.abs(data), 0.95)
-                vmin = - percentile
-                vmax = percentile
-                print(f'Heatmap with vmin {vmin:.3g}, vmax {vmax:.3g}')
-        norm = colors.TwoSlopeNorm(
-            vmin=vmin,
-            vmax=vmax,
-            vcenter=(vmin + vmax) / 2
-        )
-        plt.imshow(
-            X=data.iloc[::-1],
-            aspect=data.shape[1] / data.shape[0],  # square
-            cmap=cmap,
-            norm=norm,
-            interpolation='none',  # no interpolation
-            # to see the last values of x-axis
-            extent=[0, data.shape[1], 0, data.shape[0]]
-        )
-        # adjust the y-axis to time
-        y = self.signal.iloc[::-1].index  # values of y-axis
-        y = [i.isoformat(timespec=time_precision) for i in y]
-        ny = len(y)
-        no_labels = 15  # how many labels to see on axis y
-        step_y = int(ny / (no_labels - 1))  # step between consecutive labels
-        y_positions = np.arange(0, ny, step_y)  # pixel count at label position
-        y_labels = y[::step_y]  # labels you want
-        plt.yticks(y_positions, y_labels)
-
-    def heatmap_old(
-            self,
-            vmin: float | str = 'auto',
-            vmax: float | str = 'auto',
-            binary: bool = False,
-            threshold: float | str = 'auto',
-            sampling: bool = True
-    ) -> None:
-        """Plot heatmap. There are two options:
-        1. Plot signal data frame with as-is float values.
-        2. Plot signal data frame with transformed binary values. Must provide
-            an accompanying threshold.
-
-        Args:
-            vmin (float | str, optional): _description_. Defaults to 'auto'.
-            vmax (float | str, optional): _description_. Defaults to 'auto'.
-            binary (bool, optional): _description_. Defaults to False.
-            threshold (float | str, optional): _description_. Defaults to 4e-8.
-            sampling (bool, optional): _description_. Defaults to True.
-        """
-        # if the data is too large, sampling the data to plot faster
-        # 10**6 cells are plotted roughly in 1 second
-        # below code takes sampling if the data is more than 10*(10**6) rows
-        # i.e. more than 10 seconds to plot
-        relative_data_size = self.signal.count().sum() / (10*(10**6))
-        if sampling and (relative_data_size > 1):
-            group_factor = int(np.ceil(relative_data_size))
-            self.sample(group_factor=group_factor)
-            print(f'The data is sampled with factor {group_factor}.')
-        if binary:
-            if threshold == 'auto':
-                threshold = np.quantile(np.abs(self.signal), 0.95)
-                print(f'Binary heatmap with threshold {threshold:.3g}')
-            ax = sns.heatmap(
-                np.abs(self.signal.iloc[::-1]) >= threshold,
-                cmap='RdBu',
-                center=0
-            )
-        else:
-            if vmin == 'auto':
-                percentile = np.quantile(np.abs(self.signal), 0.95)
-                vmin = - percentile
-                vmax = percentile
-                print(f'Heatmap with vmin {vmin:.9g}, vmax {vmax:.9g}')
-            ax = sns.heatmap(
-                self.signal.iloc[::-1],
-                cmap='RdBu',
-                center=0,
-                vmin=vmin,
-                vmax=vmax
-            )
-        self.ax = ax
 
     def gauss_filter(
             self,
@@ -510,6 +363,90 @@ class Dasly:
         gauss_df = gaussian_filter(np.abs(self.signal), sigma=(alpha, beta))
         gauss_df = pd.DataFrame(gauss_df, index=self.signal.index)
         self.signal = gauss_df
+
+    def reset(self) -> None:
+        """Reset all transformations on signal
+        """
+        self.signal = self.signal_raw
+
+    def check_data_type(self) -> str:
+        """Check data type
+
+        Returns:
+            str: Either ['float', 'greyscale', 'binary']
+        """
+        # if self.signal.isin([0, 1]).all().all():  # more correct but slow
+        data_type = 'float'
+        if np.min(self.signal) == 0 and np.max(self.signal) == 1:
+            data_type = 'binary'
+        elif np.min(self.signal) == 0 and np.max(self.signal) == 255:
+            data_type = 'grey'
+        return data_type
+
+    def heatmap(
+            self,
+            vmin: float | str = 'auto',
+            vmax: float | str = 'auto',
+            time_precision: str = 'seconds'
+    ) -> None:
+        """Plot heatmap.
+
+        Args:
+            vmin (float | str, optional): Values to anchor the colormap. 'auto'
+                will take negative 95th percentile. Defaults to 'auto'.
+            vmax (float | str, optional): Values to anchor the colormap. 'auto'
+                will take 95th percentile. Defaults to 'auto'.
+            time_precision (str, optional): Precision of time in y-axis.
+                Can be in ['auto', 'hours', 'minutes', 'seconds',
+                'milliseconds', 'microseconds']. Defaults to 'seconds'.
+        """
+        relative_data_size = self.signal.count().sum() / (50*(10**6))
+        if relative_data_size > 10:
+            print(f"""Expect to display in {relative_data_size:.0f} seconds.
+                  Consider to sample the data.""")
+        data_type = self.check_data_type()
+        if data_type == 'binary':
+            cmap = 'gray'
+            if (vmin == 'auto') or (vmax == 'auto'):
+                vmin = 0
+                vmax = 1
+        elif data_type == 'grey':
+            cmap = 'viridis'
+            if (vmin == 'auto') or (vmax == 'auto'):
+                percentile = np.quantile(np.abs(self.signal), 0.95)
+                vmin = 0
+                vmax = percentile
+                print(f'Heatmap with vmin {vmin:.3g}, vmax {vmax:.3g}')
+        else:
+            cmap = 'RdBu'
+            if (vmin == 'auto') or (vmax == 'auto'):
+                percentile = np.quantile(np.abs(self.signal), 0.95)
+                vmin = - percentile
+                vmax = percentile
+                print(f'Heatmap with vmin {vmin:.3g}, vmax {vmax:.3g}')
+        norm = colors.TwoSlopeNorm(
+            vmin=vmin,
+            vmax=vmax,
+            vcenter=(vmin + vmax) / 2
+        )
+        plt.imshow(
+            X=self.signal.iloc[::-1],
+            aspect=self.signal.shape[1] / self.signal.shape[0],  # square
+            cmap=cmap,
+            norm=norm,
+            interpolation='none',  # no interpolation
+            # to see the last values of x-axis
+            extent=[0, self.signal.shape[1], 0, self.signal.shape[0]]
+        )
+        # adjust the y-axis to time
+        y = self.signal.iloc[::-1].index  # values of y-axis
+        y = [i.isoformat(timespec=time_precision) for i in y]
+        ny = len(y)
+        no_labels = 15  # how many labels to see on axis y
+        step_y = int(ny / (no_labels - 1))  # step between consecutive labels
+        y_positions = np.arange(0, ny, step_y)  # pixel count at label position
+        y_labels = y[::step_y]  # labels you want
+        plt.yticks(y_positions, y_labels)
 
     def detect_events(
             self,
