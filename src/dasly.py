@@ -3,7 +3,7 @@
 __author__ = 'khanhtruong'
 __date__ = '2022-06-16'
 
-
+from typing import Union
 from datetime import datetime, timedelta
 import warnings
 
@@ -16,8 +16,13 @@ from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
 from matplotlib import colors
 import seaborn as sns
+from scipy.signal import convolve2d
+from scipy.ndimage import convolve
+import torch
+import torch.nn.functional as F
 
-from src import simpleDASreader
+from src import simpleDASreader, helper
+
 
 sns.set()
 warnings.filterwarnings('ignore', category=pd.io.pytables.PerformanceWarning)
@@ -41,9 +46,9 @@ class Dasly:
 
     @staticmethod
     def infer_time(
-        start: str | datetime = None,
+        start: Union[str, datetime] = None,
         duration: int = None,
-        end: str | datetime = None,
+        end: Union[str, datetime] = None,
         format: str = '%Y%m%d %H%M%S'
     ) -> tuple[datetime, int, datetime]:
         """Infer start if duration and end are provided. Infer duration if
@@ -51,13 +56,13 @@ class Dasly:
         provideds.
 
         Args:
-            start (str | datetime, optional): Start time. If string, must be in
-                format YYMMDD HHMMSS, specify in argument format otherwise.
-                Defaults to None.
+            start (Union[str, datetime], optional): Start time. If string, must
+                be in format YYMMDD HHMMSS, specify in argument format
+                otherwise. Defaults to None.
             duration (int, optional): Duration of the time in seconds. Defaults
                 to None.
-            end (str | datetime, optional): End time. If string, must be in
-                format YYMMDD HHMMSS, specify in argument format otherwise.
+            end (Union[str, datetime], optional): End time. If string, must be
+                in format YYMMDD HHMMSS, specify in argument format otherwise.
                 Defaults to None.
             format (str, optional): Format of start, end. Defaults to
                 '%Y%m%d %H%M%S'.
@@ -94,21 +99,21 @@ class Dasly:
     @staticmethod
     def get_file_paths(
         folder_path: str,
-        start: str | datetime = None,
+        start: Union[str, datetime] = None,
         duration: int = None,
-        end: str | datetime = None,
+        end: Union[str, datetime] = None,
     ) -> list[str]:
         """Get file paths given the folder and time constraints.
 
         Args:
             folder_path (str): Experiment folder. Must inlcude date folders in
                 right next level.
-            start (str | datetime, optional): Start time. If string, must be in
-                format YYMMDD HHMMSS. Defaults to None.
+            start (Union[str, datetime], optional): Start time. If string, must
+                be in format YYMMDD HHMMSS. Defaults to None.
             duration (int, optional): Duration of the time in seconds. Defaults
                 to None.
-            end (str | datetime, optional): End time. If string, must be in
-                format YYMMDD HHMMSS. Defaults to None.
+            end (Union[str, datetime], optional): End time. If string, must be
+                in format YYMMDD HHMMSS. Defaults to None.
 
         Returns:
             list[str]: File paths.
@@ -138,9 +143,9 @@ class Dasly:
     def load_data(
             self,
             folder_path: str,
-            start: str | datetime = None,
+            start: Union[str, datetime] = None,
             duration: int = None,
-            end: str | datetime = None,
+            end: Union[str, datetime] = None,
     ) -> None:
         """Load data to the instance. New attribute:
         - signal_raw: unmutable data set
@@ -150,12 +155,12 @@ class Dasly:
         Args:
             folder_path (str): Experiment folder. Must inlcude date folders in
                 right next level.
-            start (str | datetime, optional): Start time. If string, must be in
-                format YYMMDD HHMMSS. Defaults to None.
+            start (Union[str, datetime], optional): Start time. If string, must
+                be in format YYMMDD HHMMSS. Defaults to None.
             duration (int, optional): Duration of the time in seconds. Defaults
                 to None.
-            end (str | datetime, optional): End time. If string, must be in
-                format YYMMDD HHMMSS. Defaults to None.
+            end (Union[str, datetime], optional): End time. If string, must be
+                in format YYMMDD HHMMSS. Defaults to None.
         """
         start, duration, end = Dasly.infer_time(start, duration, end)
         file_paths = Dasly.get_file_paths(
@@ -273,10 +278,11 @@ class Dasly:
         self.signal = signal_sample
         self.sampling_rate = len(self.signal) / self.duration
 
-    def sample(
-            self,
-            group_factor: int
-    ) -> pd.DataFrame:
+    def get_sampling_rate(self) -> float:
+        sampling_rate = len(self.signal) / self.duration
+        return sampling_rate
+
+    def sample(self, group_factor: int) -> None:
         """Take sampling according to time (rows).
 
         Args:
@@ -284,25 +290,25 @@ class Dasly:
                 will take average of every 5 rows
         """
         # create antificial groups
-        groups = np.arange(len(self.signal_raw)) // group_factor
+        groups = np.arange(len(self.signal)) // group_factor
         # calculate means by group
-        signal = self.signal_raw.groupby(groups).mean()
+        signal = self.signal.groupby(groups).mean()
         # take correct index
-        signal.index = self.signal_raw.iloc[::group_factor, :].index
+        signal.index = self.signal.iloc[::group_factor, :].index
         self.signal = signal
-        return signal
+        self.sampling_rate = self.get_sampling_rate()
 
     def binary_filter(
             self,
-            threshold: float | str = 'auto',
+            threshold: Union[float, str] = 'auto',
             inplace: bool = True
     ) -> None:
         """Transform data to binary. First take absolute value. Then map to 1
             if greater than or equal to threshold, 0 otherwise.
 
         Args:
-            threshold (float | str, optional): If 'auto', take 95th percentile.
-                Defaults to 'auto'.
+            threshold (Union[float, str], optional): If 'auto', take 95th
+                percentile. Defaults to 'auto'.
             inplace (bool, optional): If overwite self.signal. Defaults to
                 True.
         """
@@ -376,26 +382,29 @@ class Dasly:
             str: Either ['float', 'greyscale', 'binary']
         """
         # if self.signal.isin([0, 1]).all().all():  # more correct but slow
-        data_type = 'float'
         if np.min(self.signal) == 0 and np.max(self.signal) == 1:
             data_type = 'binary'
         elif np.min(self.signal) == 0 and np.max(self.signal) == 255:
             data_type = 'grey'
+        elif np.min(self.signal) >= 0:
+            data_type = 'positive'
+        else:
+            data_type = 'float'
         return data_type
 
     def heatmap(
             self,
-            vmin: float | str = 'auto',
-            vmax: float | str = 'auto',
+            vmin: Union[float, str] = 'auto',
+            vmax: Union[float, str] = 'auto',
             time_precision: str = 'seconds'
     ) -> None:
         """Plot heatmap.
 
         Args:
-            vmin (float | str, optional): Values to anchor the colormap. 'auto'
-                will take negative 95th percentile. Defaults to 'auto'.
-            vmax (float | str, optional): Values to anchor the colormap. 'auto'
-                will take 95th percentile. Defaults to 'auto'.
+            vmin (Union[float, str], optional): Values to anchor the colormap.
+                'auto' will take negative 95th percentile. Defaults to 'auto'.
+            vmax (Union[float, str], optional): Values to anchor the colormap.
+                'auto' will take 95th percentile. Defaults to 'auto'.
             time_precision (str, optional): Precision of time in y-axis.
                 Can be in ['auto', 'hours', 'minutes', 'seconds',
                 'milliseconds', 'microseconds']. Defaults to 'seconds'.
@@ -410,7 +419,7 @@ class Dasly:
             if (vmin == 'auto') or (vmax == 'auto'):
                 vmin = 0
                 vmax = 1
-        elif data_type == 'grey':
+        elif data_type in ['grey', 'positive']:
             cmap = 'viridis'
             if (vmin == 'auto') or (vmax == 'auto'):
                 percentile = np.quantile(np.abs(self.signal), 0.95)
@@ -447,6 +456,90 @@ class Dasly:
         y_positions = np.arange(0, ny, step_y)  # pixel count at label position
         y_labels = y[::step_y]  # labels you want
         plt.yticks(y_positions, y_labels)
+
+    def convolve(
+        self,
+        s1: float = 80,
+        s2: float = 85,
+        std_space: float = 10
+    ) -> None:
+        """Calculate covariance matrix from speed limits and space standard
+        deviation.
+
+        Args:
+            s1 (float, optional): Low speed limit. Defaults to 80.
+            s2 (float, optional): High speed limit. Defaults to 85.
+            std_space (float, optional): Space standard deviation to convolve.
+                Defaults to 10.
+        """
+
+        cov_mat = helper.cal_cov_mat(s1, s2, std_space)
+        gauss_filter = helper.create_gauss_filter(cov_mat)
+        signal = convolve2d(
+            in1=self.signal.to_numpy(),
+            in2=gauss_filter[::-1, ::-1],
+            mode='same',
+        )
+        self.signal = pd.DataFrame(signal, index=self.signal.index)
+
+    def convolve2(
+        self,
+        s1: float = 80,
+        s2: float = 85,
+        std_space: float = 10
+    ) -> None:
+        """Calculate covariance matrix from speed limits and space standard
+        deviation.
+
+        Args:
+            s1 (float, optional): Low speed limit. Defaults to 80.
+            s2 (float, optional): High speed limit. Defaults to 85.
+            std_space (float, optional): Space standard deviation to convolve.
+                Defaults to 10.
+        """
+        cov_mat = helper.cal_cov_mat(s1, s2, std_space)
+        gauss_filter = helper.create_gauss_filter(
+            cov_mat=cov_mat,
+            sampling_rate=self.sampling_rate
+        )
+        signal = convolve(
+            input=self.signal.to_numpy(),
+            weights=gauss_filter,
+            mode='constant',
+            origin=-1
+        )
+        self.signal = pd.DataFrame(signal, index=self.signal.index)
+
+    def convolve_torch(
+        self,
+        s1: float = 80,
+        s2: float = 85,
+        std_space: float = 10
+    ):
+        cov_mat = helper.cal_cov_mat(s1, s2, std_space)
+        gauss_filter = helper.create_gauss_filter(
+            cov_mat=cov_mat,
+            sampling_rate=self.sampling_rate
+        )
+        signal_tensor = torch.tensor(
+            self.signal.values,
+            dtype=torch.float32
+        ).to('cuda')
+        filter_tensor = torch.tensor(
+            gauss_filter,
+            dtype=torch.float32
+        ).to('cuda')
+        pad_t = np.floor(filter_tensor.shape[0] / 2).astype(int)
+        pad_s = np.floor(filter_tensor.shape[1] / 2).astype(int)
+        signal = F.conv2d(
+            signal_tensor.unsqueeze(0).unsqueeze(0),
+            filter_tensor.unsqueeze(0).unsqueeze(0),
+            padding=(pad_t, pad_s)
+        )
+        signal = signal[:, :, 0: self.signal.shape[0], 0: self.signal.shape[1]]
+        signal = signal.squeeze(0).squeeze(0)
+        signal = signal.detach().cpu().numpy()
+        self.signal = pd.DataFrame(signal, index=self.signal.index)
 
     def detect_events(
             self,
@@ -583,15 +676,15 @@ class Dasly:
 
 
 def split_period(
-        period: tuple[str | int, str | int],
+        period: tuple[Union[int, str], Union[int, str]],
         time_span: int = 10,
         date: str = '20230628'
 ) -> list[tuple[datetime, datetime]]:
     """Split a period into many smaller periods.
 
     Args:
-        periods (tuple[str | int, str | int]: (start, end) of period. Format
-            '%H%M%S'.
+        periods (tuple[Union[int, str], Union[int, str]]: (start, end) of
+            period. Format '%H%M%S'.
         time_span (int, optional): Period duration in seconds to split.
             Defaults to 10.
         date (str, optional): Date of the data. Format '%Y%m%d'. Defaults to
