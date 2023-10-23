@@ -16,8 +16,6 @@ from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
 from matplotlib import colors
 import seaborn as sns
-from scipy.signal import convolve2d
-from scipy.ndimage import convolve
 import torch
 import torch.nn.functional as F
 
@@ -26,6 +24,9 @@ from src import simpleDASreader, helper
 
 sns.set()
 warnings.filterwarnings('ignore', category=pd.io.pytables.PerformanceWarning)
+warnings.filterwarnings('ignore', 'is_categorical_dtype')
+# seaborn v0.13.0 has been released with these updates
+# https://github.com/mwaskom/seaborn/issues/3462
 
 
 class Dasly:
@@ -39,10 +40,11 @@ class Dasly:
         self.signal_decimate: pd.DataFrame = None
         self.events: np.ndarray = None
         self.events_df: pd.DataFrame = None
-        self.clustering: sklearn.cluster._dbscan.DBSCAN = None
+        self.cluster: sklearn.cluster._dbscan.DBSCAN = None
         self.sampling_rate: int = None
         self.duration: int = None
         self.data_type: str = None
+        self.scale_factor: float = 1e-10
 
     @staticmethod
     def infer_time(
@@ -162,7 +164,11 @@ class Dasly:
             end (Union[str, datetime], optional): End time. If string, must be
                 in format YYMMDD HHMMSS. Defaults to None.
         """
-        start, duration, end = Dasly.infer_time(start, duration, end)
+        start, duration, end = Dasly.infer_time(
+            start=start,
+            duration=duration,
+            end=end
+        )
         file_paths = Dasly.get_file_paths(
             folder_path=folder_path,
             start=start,
@@ -182,11 +188,13 @@ class Dasly:
             userSensitivity=None  # default
         )
         signal = pd.DataFrame(signal)
+        signal = signal.div(self.scale_factor)
         # Transform dataframe
         #######################################################################
-        signal = signal[start:end]  # take extact the range start-end
+        signal = signal[start:end]  # extact only the range start-end
         signal = signal.iloc[:-1]  # drop the last record (new second already)
-        # signal = signal.iloc[::-1]  # reverse order of time, to plot easier
+        # if the data is within one day, just keep the time as index
+        # because keeping date makes the index unnecessarily long
         if pd.Series(signal.index).dt.date.nunique() == 1:
             signal.index = pd.to_datetime(signal.index).time
         self.signal_raw = signal
@@ -386,6 +394,8 @@ class Dasly:
             data_type = 'binary'
         elif np.min(self.signal) == 0 and np.max(self.signal) == 255:
             data_type = 'grey'
+        elif np.min(self.signal) == -1 or np.min(self.signal) == 0:
+            data_type = 'category'
         elif np.min(self.signal) >= 0:
             data_type = 'positive'
         else:
@@ -409,6 +419,7 @@ class Dasly:
                 Can be in ['auto', 'hours', 'minutes', 'seconds',
                 'milliseconds', 'microseconds']. Defaults to 'seconds'.
         """
+        # 50*(10**6) cells takes about 1 second to plot
         relative_data_size = self.signal.count().sum() / (50*(10**6))
         if relative_data_size > 10:
             print(f"""Expect to display in {relative_data_size:.0f} seconds.
@@ -438,17 +449,21 @@ class Dasly:
             vmax=vmax,
             vcenter=(vmin + vmax) / 2
         )
+        if data_type == 'category':
+            cmap = 'tab10'
+            norm = None
         plt.imshow(
-            X=self.signal.iloc[::-1],
+            X=self.signal,
             aspect=self.signal.shape[1] / self.signal.shape[0],  # square
             cmap=cmap,
             norm=norm,
             interpolation='none',  # no interpolation
             # to see the last values of x-axis
-            extent=[0, self.signal.shape[1], 0, self.signal.shape[0]]
+            extent=[0, self.signal.shape[1], 0, self.signal.shape[0]],
+            origin='lower'
         )
         # adjust the y-axis to time
-        y = self.signal.iloc[::-1].index  # values of y-axis
+        y = self.signal.index  # values of y-axis
         y = [i.isoformat(timespec=time_precision) for i in y]
         ny = len(y)
         no_labels = 15  # how many labels to see on axis y
@@ -456,61 +471,10 @@ class Dasly:
         y_positions = np.arange(0, ny, step_y)  # pixel count at label position
         y_labels = y[::step_y]  # labels you want
         plt.yticks(y_positions, y_labels)
+        if data_type == 'category':
+            plt.colorbar()
 
     def convolve(
-        self,
-        s1: float = 80,
-        s2: float = 85,
-        std_space: float = 10
-    ) -> None:
-        """Calculate covariance matrix from speed limits and space standard
-        deviation.
-
-        Args:
-            s1 (float, optional): Low speed limit. Defaults to 80.
-            s2 (float, optional): High speed limit. Defaults to 85.
-            std_space (float, optional): Space standard deviation to convolve.
-                Defaults to 10.
-        """
-
-        cov_mat = helper.cal_cov_mat(s1, s2, std_space)
-        gauss_filter = helper.create_gauss_filter(cov_mat)
-        signal = convolve2d(
-            in1=self.signal.to_numpy(),
-            in2=gauss_filter[::-1, ::-1],
-            mode='same',
-        )
-        self.signal = pd.DataFrame(signal, index=self.signal.index)
-
-    def convolve2(
-        self,
-        s1: float = 80,
-        s2: float = 85,
-        std_space: float = 10
-    ) -> None:
-        """Calculate covariance matrix from speed limits and space standard
-        deviation.
-
-        Args:
-            s1 (float, optional): Low speed limit. Defaults to 80.
-            s2 (float, optional): High speed limit. Defaults to 85.
-            std_space (float, optional): Space standard deviation to convolve.
-                Defaults to 10.
-        """
-        cov_mat = helper.cal_cov_mat(s1, s2, std_space)
-        gauss_filter = helper.create_gauss_filter(
-            cov_mat=cov_mat,
-            sampling_rate=self.sampling_rate
-        )
-        signal = convolve(
-            input=self.signal.to_numpy(),
-            weights=gauss_filter,
-            mode='constant',
-            origin=-1
-        )
-        self.signal = pd.DataFrame(signal, index=self.signal.index)
-
-    def convolve_torch(
         self,
         s1: float = 80,
         s2: float = 85,
@@ -543,29 +507,35 @@ class Dasly:
 
     def detect_events(
             self,
-            threshold: float = 4e-8,
             eps: float = 100,
-            min_samples: int = 100,
-            plot: bool = True
+            min_samples: int = 100
     ) -> None:
         """Detect events.
 
         Args:
-            threshold (float, optional): _description_. Defaults to None.
             eps (float, optional): _description_. Defaults to 3.
             min_samples (int, optional): _description_. Defaults to 2.
-            plot (bool, optional): _description_. Defaults to True.
-
-        Raises:
-            ValueError: Must set threshold if not yet plot heatmap binary.
         """
+        SPEED_MS = 25  # 25meter ~ 1 second
         # Detect events
         #######################################################################
-        events = np.argwhere(np.abs(self.signal.values) >= threshold)
-        clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(events)
-        events_df = (
-            pd.DataFrame(events, columns=['Time', 'Channel'])
-            .assign(Cluster=clustering.labels_)
+        points = np.argwhere(self.signal.values == 1)
+        points = points * np.array([SPEED_MS / self.sampling_rate, 1])
+        cluster = DBSCAN(
+            eps=eps,
+            min_samples=min_samples,
+            metric='euclidean'
+        )
+        cluster = cluster.fit(points)
+        # replace the cluster label to the signal data
+        self.signal.replace(0, np.nan, inplace=True)
+        points = points / np.array([SPEED_MS / self.sampling_rate, 1])
+        points = points.astype(int)
+        for i in range(len(points)):
+            self.signal.iloc[points[i][0], points[i][1]] = cluster.labels_[i]
+        events = (
+            pd.DataFrame(points, columns=['Time', 'Channel'])
+            .assign(Cluster=cluster.labels_)
             .groupby('Cluster')
             .agg({
                 'Time': 'min',
@@ -573,33 +543,10 @@ class Dasly:
             .round(0)
             .astype(int)
         )
-        events_df.columns = ['Time', 'Channel', 'Count']
+        events.columns = ['Time', 'Channel', 'Count']
+        self.points = points
+        self.cluster = cluster
         self.events = events
-        self.events_df = events_df
-        self.clustering = clustering
-        # Plot events
-        #######################################################################
-        if plot:
-            fig_size = plt.rcParams.get('figure.figsize')
-            plt.figure(figsize=(fig_size[0] * 0.8, fig_size[1]))
-            # if max(clustering.labels_) > 15:
-            #     legend = False
-            # else:
-            #     legend = 'auto'
-            ax = sns.scatterplot(
-                x=events[:, 1],  # xaxis of events - space
-                y=events[:, 0],  # yaxis of events - time
-                s=0.5,
-                hue=clustering.labels_,
-                palette='tab10',
-                # legend=legend
-            )
-            ax.set_xticks(self.ax.get_xticks())
-            ax.set_xticklabels(self.ax.get_xticklabels(), rotation=90)
-            ax.set_yticks(self.ax.get_yticks()[::-1])
-            ax.set_yticklabels(self.ax.get_yticklabels())
-            plt.xlim(0, self.signal.shape[1])
-            plt.ylim(0, self.signal.shape[0])
 
     def save_events(
             self,
@@ -675,78 +622,6 @@ class Dasly:
             data_cut.to_hdf(file_name, key='abc')
 
 
-def split_period(
-        period: tuple[Union[int, str], Union[int, str]],
-        time_span: int = 10,
-        date: str = '20230628'
-) -> list[tuple[datetime, datetime]]:
-    """Split a period into many smaller periods.
-
-    Args:
-        periods (tuple[Union[int, str], Union[int, str]]: (start, end) of
-            period. Format '%H%M%S'.
-        time_span (int, optional): Period duration in seconds to split.
-            Defaults to 10.
-        date (str, optional): Date of the data. Format '%Y%m%d'. Defaults to
-            '20230628'.
-
-    Returns:
-        list[tuple[datetime, datetime]]: List of all smaller periods.
-    """
-    # Convert start, end to datetime
-    ###########################################################################
-    start = period[0]
-    end = period[1]
-    if start > end:
-        raise ValueError('start must be smaller or equal to end.')
-    start = datetime.strptime(f'{date} {start}', '%Y%m%d %H%M%S')
-    end = datetime.strptime(f'{date} {end}', '%Y%m%d %H%M%S')
-    # Split the duration into many smaller durations
-    ###########################################################################
-    duration = (end - start).seconds
-    number_split = duration // time_span
-    remaining = duration % time_span
-    duration_split = [time_span] * number_split + [remaining]
-    # Identify the start, end of each duration
-    ###########################################################################
-    periods = []
-    for i in duration_split:
-        end = start + timedelta(seconds=i)
-        period_i = (start, end)
-        periods.append(period_i)
-        start = end
-    return periods
-
-
-def split_periods(
-        periods: list[tuple[datetime, datetime]],
-        time_span: int = 10,
-        date: str = '20230628'
-) -> list[tuple[datetime, datetime]]:
-    """Split periods into many smaller periods.
-
-    Args:
-        period (list[tuple[datetime, datetime]]): (start, end) of periods.
-            Format '%H%M%S'.
-        time_span (int, optional): Period duration in seconds to split.
-            Defaults to 10.
-        date (str, optional): Date of the data. Format '%Y%m%d'. Defaults to
-            '20230628'.
-
-    Returns:
-        list[tuple[datetime, datetime]]: List of all smaller periods.
-    """
-    periods_split = []
-    for period in periods:
-        periods_i = split_period(
-            period=period,
-            time_span=time_span,
-            date=date
-        )
-        periods_split.extend(periods_i)
-    return periods_split
-
-
 if __name__ == "__main__":
 
     periods = [
@@ -755,7 +630,7 @@ if __name__ == "__main__":
         # (104730, 105911),
         # (105935, 110455),
     ]
-    periods_split = split_periods(periods=periods, time_span=10)
+    periods_split = helper.split_periods(periods=periods, time_span=10)
 
     # Run the flow at every small period
     ###########################################################################

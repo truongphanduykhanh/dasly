@@ -1,4 +1,6 @@
+from typing import Union
 import math
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -232,3 +234,99 @@ def heatmap_filter(filter_arr: np.ndarray, sampling_rate: int = 1000) -> None:
     y_positions = np.arange(0, ny, step_y)  # pixel count at label position
     y_labels = range(no_labels)  # labels you want
     plt.yticks(y_positions, y_labels)
+
+
+def das_distance(
+    x: np.ndarray,
+    y: np.ndarray,
+    sampling_rate: float
+) -> float:
+    """Calculate the distance in DAS data. Assume 90km/h (25m/s) makes a 45
+        degrees line when plotting.
+
+    Args:
+        x (np.ndarray): E.g. array([a, b]) where a is in time, b is in space
+        y (np.ndarray): E.g. array([a, b]) where a is in time, b is in space
+        sampling_rate (float): How many data were sampling per second.
+
+    Returns:
+        float: Distance in DAS data.
+    """
+    SPEED_KMH = 90  # 25m/s: 25meter ~ 1second
+    speed_ms = SPEED_KMH / 3.6  # 25m/s: 25meter ~ 1second
+    x = x * np.array([speed_ms / sampling_rate, 1])
+    y = y * np.array([speed_ms / sampling_rate, 1])
+    distance = np.sqrt(np.sum((x - y)**2))
+    return distance
+
+
+def split_period(
+        period: tuple[Union[int, str], Union[int, str]],
+        time_span: int = 10,
+        date: str = '20230628'
+) -> list[tuple[datetime, datetime]]:
+    """Split a period into many smaller periods.
+
+    Args:
+        periods (tuple[Union[int, str], Union[int, str]]: (start, end) of
+            period. Format '%H%M%S'.
+        time_span (int, optional): Period duration in seconds to split.
+            Defaults to 10.
+        date (str, optional): Date of the data. Format '%Y%m%d'. Defaults to
+            '20230628'.
+
+    Returns:
+        list[tuple[datetime, datetime]]: List of all smaller periods.
+    """
+    # Convert start, end to datetime
+    ###########################################################################
+    start = period[0]
+    end = period[1]
+    if start > end:
+        raise ValueError('start must be smaller or equal to end.')
+    start = datetime.strptime(f'{date} {start}', '%Y%m%d %H%M%S')
+    end = datetime.strptime(f'{date} {end}', '%Y%m%d %H%M%S')
+    # Split the duration into many smaller durations
+    ###########################################################################
+    duration = (end - start).seconds
+    number_split = duration // time_span
+    remaining = duration % time_span
+    duration_split = [time_span] * number_split + [remaining]
+    # Identify the start, end of each duration
+    ###########################################################################
+    periods = []
+    for i in duration_split:
+        end = start + timedelta(seconds=i)
+        period_i = (start, end)
+        periods.append(period_i)
+        start = end
+    return periods
+
+
+def split_periods(
+        periods: list[tuple[datetime, datetime]],
+        time_span: int = 10,
+        date: str = '20230628'
+) -> list[tuple[datetime, datetime]]:
+    """Split periods into many smaller periods.
+
+    Args:
+        period (list[tuple[datetime, datetime]]): (start, end) of periods.
+            Format '%H%M%S'.
+        time_span (int, optional): Period duration in seconds to split.
+            Defaults to 10.
+        date (str, optional): Date of the data. Format '%Y%m%d'. Defaults to
+            '20230628'.
+
+    Returns:
+        list[tuple[datetime, datetime]]: List of all smaller periods.
+    """
+    periods_split = []
+    for period in periods:
+        periods_i = split_period(
+            period=period,
+            time_span=time_span,
+            date=date
+        )
+        periods_split.extend(periods_i)
+    return periods_split
