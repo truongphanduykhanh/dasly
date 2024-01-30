@@ -1,3 +1,4 @@
+import os
 from typing import Union
 import math
 from datetime import datetime, timedelta
@@ -330,3 +331,59 @@ def split_periods(
         )
         periods_split.extend(periods_i)
     return periods_split
+
+
+def files_in_folder(folder_path: str) -> list[str]:
+    """List all files in a folder
+
+    Args:
+        folder_path (str): Folder path
+
+    Returns:
+        list[str]: all files
+    """
+    file_list = []
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            file_list.append(os.path.join(root, file))
+    return file_list
+
+
+# helper function
+#######################################################################
+def find_divisors(number: int) -> list[int]:
+    """List all divisors of an integer number.
+
+    Args:
+        number (int): Input number.
+
+    Returns:
+        list[int]: List of divisors of input number.
+    """
+    divisors = []
+    for i in range(1, number + 1):
+        if number % i == 0:
+            divisors.append(i)
+    return divisors
+
+
+# helper function
+#######################################################################
+def largest_smaller_than_threshold(
+    lst: list[float], threshold: float
+) -> Union[float, None]:
+    """Find the largest number in a list that is smaller than or equal
+    to a threshold.
+
+    Args:
+        lst (list[float]): List of number
+        threshold (float): Threshold.
+
+    Returns:
+        list[float]: List of number.
+    """
+    filtered_values = [x for x in lst if x <= threshold]
+    if filtered_values:
+        return max(filtered_values)
+    else:
+        return None  # If there are no values smaller than threshold
