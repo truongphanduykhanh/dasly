@@ -6,12 +6,14 @@ __date__ = '2024-01-02'
 from typing import Union
 from datetime import datetime, timedelta
 import warnings
+import math
 
 import numpy as np
 import pandas as pd
+import scipy
 from scipy import fft
 from scipy.signal import butter, sosfilt, decimate
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import convolve
 import sklearn
 from sklearn.cluster import DBSCAN
 from matplotlib import colors
@@ -19,6 +21,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
 import torch.nn.functional as F
+import cv2
 
 from src import simpleDASreader, helper
 
@@ -46,6 +49,7 @@ class Dasly:
         self.duration: int = None
         self.data_type: str = None
         self.channel: float = 1.0  # meter between two consecutive channels
+        self.lines: np.ndarray = None
 
     def update_sampling_rate(self) -> None:
         self.sampling_rate = len(self.signal) / self.duration
@@ -482,19 +486,21 @@ class Dasly:
 
     def binary_filter(
         self,
-        quantile: float = 0.95,
+        quantile: float = 0.90,
         threshold: float = None,
-        inplace: bool = True
+        by_column: bool = True,
+        inplace: bool = True,
     ) -> Union[None, pd.DataFrame]:
         """Transform data to binary. First take absolute value. Then map to 1
             if greater than or equal to threshold, 0 otherwise.
 
         Args:
-            quantile (float, optional): Quantile as a threshold.
-                Either quantile or threshold is be inputed. Cannot input both.
-                Defaults to 0.95.
-            threshold (float, optional): Threshold value. Defaults
-                to None.
+            quantile (float, optional): Quantile as a threshold. Defaults to
+                0.90.
+            threshold (float, optional): Threshold value, apply one threshold
+                to all data frame.
+            by_column (bool, optional): get binary by applying different
+                thresholds for every column.
             inplace (bool, optional): If overwrite attribute signal. Defaults
                 to True.
 
@@ -503,14 +509,17 @@ class Dasly:
         """
         # check arguments
         #######################################################################
-        if (threshold is None) + (quantile is None) != 1:
-            raise ValueError(
-                "The function accepts one and only one out of two \
-                    (threshold, quantile)")
         if threshold is None:
             threshold = np.quantile(np.abs(self.signal), quantile)
-            print(f'Threshold: {threshold:.3g}')
-        signal_binary = (np.abs(self.signal) >= threshold).astype(int)
+            if not by_column:
+                print(f'threshold: {threshold}')
+        # by each columns
+        #######################################################################
+        if by_column:
+            mean = np.mean(np.abs(self.signal), axis=0)
+            std = np.std(np.abs(self.signal), axis=0)
+            threshold = mean + scipy.stats.norm.ppf(quantile) * std
+        signal_binary = (np.abs(self.signal) >= threshold).astype(np.uint8)
         # return
         #######################################################################
         if inplace:
@@ -540,39 +549,130 @@ class Dasly:
         else:
             return signal_gray
 
-    def gauss_filter(
+    def gray_filter_cv2(
         self,
-        beta: float = 20,  # 20 channels
-        beta_alpha_factor: float = 25,  # 1 channel equals 1/25 seconds
-        alpha: float = None
-    ) -> None:
-        """Apply 2d Gaussian filter.
+        inplace: bool = True
+    ) -> Union[None, pd.DataFrame]:
+        """Transform data to grayscale 0 to 255 using cv2 scalling.
 
         Args:
-            beta (float, optional): Sigma along the column axis (channel).
-                Defaults to 20.
-            beta_alpha_factor (float, optional): 1 channel equals
-                beta_alpha_factor seconds. Defaults to 25.
-            alpha (float, optional): Sigma along the row axis (time).
-                Defaults to None.
+            inplace (bool, optional): If overwrite attribute signal. Defaults
+                to True.
 
-        Raises:
-            ValueError: The function accepts two and only two out of three \
-                (alpha, beta, beta_alpha_factor)
+        Returns:
+            Union[None, pd.DataFrame]: pd.DataFrame if inplace=False.
         """
-        # Check number of argument
+        # cv2 methods
+        signal_scaled = self.signal / np.quantile(self.signal, 0.5)
+        signal_gray = cv2.convertScaleAbs(signal_scaled)
+        # return
         #######################################################################
-        if (alpha is None) + (beta is None) + (beta_alpha_factor is None) != 1:
-            raise ValueError("The function accepts two and only two out of \
-                             three (alpha, beta, beta_alpha_factor)")
-        frequency = len(self.signal) / self.duration
-        if alpha is None:
-            alpha = beta / beta_alpha_factor * frequency
-        if beta is None:
-            beta = alpha * beta_alpha_factor / frequency
-        gauss_df = gaussian_filter(np.abs(self.signal), sigma=(alpha, beta))
-        gauss_df = pd.DataFrame(gauss_df, index=self.signal.index)
-        self.signal = gauss_df
+        if inplace:
+            self.signal = signal_gray
+        else:
+            return signal_gray
+
+    def gauss_filter(
+        self,
+        s1: float = 80,
+        s2: float = 85,
+        std_space: float = 10,
+        cov_mat: np.ndarray = None,
+        inplace: bool = True
+    ) -> Union[None, pd.DataFrame]:
+        """Gaussian filter the data. There are 2 ways of input infomration of
+            the filter:
+            1. Input covariance matrix cov_mat
+            2. Input (s1, s2, std_space). From that, the program will infer the
+            covariance matrix. This is particular useful for straight line
+            shape alike application.
+
+        Args:
+            s1 (float, optional): Lower speed limit. Defaults to 80.
+            s2 (float, optional): Upper speed limit. Defaults to 85.
+            std_space (float, optional): Standard deviation along space axis.
+                Defaults to 10.
+            cov_mat (np.ndarray, optional):  The covariance matrix has the form
+                of [[a, b], [b, c]], in which a is the variance along the space
+                axis (not time!), c is the variance along the time axis, b is
+                the covariance between space and time. The unit of time is
+                second, the unit of space is channel. Defaults to None.
+            inplace (bool, optional): If overwrite attribute signal. Defaults
+                to True.
+
+        Returns:
+            Union[None, pd.DataFrame]: pd.DataFrame if inplace=False.
+
+        """
+        # calculate covariance matrix if not inputted
+        #######################################################################
+        if cov_mat is None:
+            cov_mat = helper.cal_cov_mat(s1, s2, std_space)
+        gauss_filter = helper.create_gauss_filter(
+            cov_mat=cov_mat,
+            sampling_rate=self.sampling_rate
+        )
+        signal_tensor = torch.tensor(
+            self.signal.values.copy(),
+            dtype=torch.float32
+        ).to('cuda')
+        filter_tensor = torch.tensor(
+            gauss_filter,
+            dtype=torch.float32
+        ).to('cuda')
+        pad_t = np.floor(filter_tensor.shape[0] / 2).astype(int)
+        pad_s = np.floor(filter_tensor.shape[1] / 2).astype(int)
+        signal_gaussian = F.conv2d(
+            signal_tensor.unsqueeze(0).unsqueeze(0),
+            filter_tensor.unsqueeze(0).unsqueeze(0),
+            padding=(pad_t, pad_s)
+        )
+        signal_gaussian = signal_gaussian[
+            :, :, 0: self.signal.shape[0], 0: self.signal.shape[1]]
+        signal_gaussian = signal_gaussian.squeeze(0).squeeze(0)
+        signal_gaussian = signal_gaussian.detach().cpu().numpy()
+        signal_gaussian = pd.DataFrame(
+            signal_gaussian,
+            index=self.signal.index)
+        # return
+        #######################################################################
+        if inplace:
+            self.signal = signal_gaussian
+        else:
+            return signal_gaussian
+
+    def sobel_filter(self, inplace: bool = True) -> Union[None, pd.DataFrame]:
+        """Apply Sobel operator to detect edges.
+
+        Args:
+            inplace (bool, optional): If overwrite attribute signal. Defaults
+                to True.
+
+        Returns:
+            Union[None, pd.DataFrame]: pd.DataFrame if inplace=False.
+        """
+        # Define the Sobel operator kernels
+        sobel_kernel_x = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
+        sobel_kernel_y = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]])
+
+        # Apply Sobel operator in the x and y directions
+        sobel_x = convolve(self.signal.values, sobel_kernel_x)
+        sobel_y = convolve(self.signal.values, sobel_kernel_y)
+
+        # Filter only possitive gradients
+        sobel_x_positive = np.maximum(sobel_x, 0)
+        sobel_y_positive = np.maximum(sobel_y, 0)
+
+        # Calculate the magnitude of the gradient
+        gradient_magnitude = np.sqrt(sobel_x_positive**2 + sobel_y_positive**2)
+        signal_sobel = pd.DataFrame(
+            gradient_magnitude, index=self.signal.index)
+        # return
+        #######################################################################
+        if inplace:
+            self.signal = signal_sobel
+        else:
+            return signal_sobel
 
     def check_data_type(
         self,
@@ -611,6 +711,7 @@ class Dasly:
 
         Args:
             data (pd.DataFrame): Input data frame.
+
         Returns:
             int: duration in seconds of the data.
         """
@@ -681,13 +782,14 @@ class Dasly:
             if vmax is None:
                 percentile = np.quantile(data, 0.95)
                 vmax = percentile
+            print(f'vmax: {vmax:.3g}')
         else:
             cmap = 'RdBu'
             if (vmin is None) or (vmax is None):
                 percentile = np.quantile(np.abs(self.signal), 0.95)
                 vmin = - percentile
                 vmax = percentile
-                print(f'Heatmap with vmin {vmin:.3g}, vmax {vmax:.3g}')
+                print(f'vmin: {vmin:.3g}, vmax: {vmax:.3g}')
         norm = colors.TwoSlopeNorm(
             vmin=vmin,
             vmax=vmax,
@@ -706,9 +808,14 @@ class Dasly:
             norm=norm,
             interpolation='none',  # no interpolation
             # to see the last values of x-axis
-            # extent=[0, self.signal.shape[1], 0, self.signal.shape[0]],
+            extent=[0, self.signal.shape[1], 0, self.signal.shape[0]],
             origin='lower'
         )
+        if self.lines is not None:
+            for line in self.lines:
+                x1, y1, x2, y2 = line
+                plt.plot([x1, x2], [y1, y2])
+
         # adjust the y-axis to time
         #######################################################################
         try:  # in case input data is np.ndarray, which doesn't have time index
@@ -742,43 +849,115 @@ class Dasly:
         # if data_type == 'category':
         #     plt.colorbar()
 
-    def convolve(
-        self,
-        s1: float = 80,
-        s2: float = 85,
-        std_space: float = 10
-    ):
-        """Gaussian filter the data 
-
-        Args:
-            s1 (float, optional): _description_. Defaults to 80.
-            s2 (float, optional): _description_. Defaults to 85.
-            std_space (float, optional): _description_. Defaults to 10.
+    def hough_transform(self) -> None:
+        """Apply Hough transform to detect lines in the data.
         """
-        cov_mat = helper.cal_cov_mat(s1, s2, std_space)
-        gauss_filter = helper.create_gauss_filter(
-            cov_mat=cov_mat,
-            sampling_rate=self.sampling_rate
+        # angle resolution (theta)
+        #######################################################################
+        average_speed = 80  # in km/h
+        speed_resolution = 0.1
+        # angle in radian
+        angle1 = math.atan(self.sampling_rate / (average_speed / 3.6))
+        angle2 = math.atan(
+            self.sampling_rate / ((average_speed + speed_resolution) / 3.6))
+        angle_resolution = np.abs(angle1 - angle2)  # radian resolution needed
+
+        # length of vehicle (lines) want to predict
+        #######################################################################
+        # mimimum time in seconds a vehicle needs to be on the bridge to be
+        # detected. The higher this value is, the more accurate the detection,
+        # but the larger the delay of detection (need to wait longer)
+        time = 8  # in second
+        distance = average_speed / 3.6 * time  # in meter
+        length = np.sqrt((time * self.sampling_rate) ** 2 + distance ** 2)
+
+        lines = cv2.HoughLinesP(
+            self.signal.values,
+            rho=1,  # distance resolution
+            # angle resolution in radian need to have speed resolution ~0.1k/m
+            theta=angle_resolution,
+            threshold=int(0.8 * length),  # needs to covert 80% of the length
+            minLineLength=0.5 * length,  # needs to at least 50% of the length
+            maxLineGap=0.2 * length  # must not interupt > 20% of the length
         )
-        signal_tensor = torch.tensor(
-            self.signal.values.copy(),
-            dtype=torch.float32
-        ).to('cuda')
-        filter_tensor = torch.tensor(
-            gauss_filter,
-            dtype=torch.float32
-        ).to('cuda')
-        pad_t = np.floor(filter_tensor.shape[0] / 2).astype(int)
-        pad_s = np.floor(filter_tensor.shape[1] / 2).astype(int)
-        signal = F.conv2d(
-            signal_tensor.unsqueeze(0).unsqueeze(0),
-            filter_tensor.unsqueeze(0).unsqueeze(0),
-            padding=(pad_t, pad_s)
-        )
-        signal = signal[:, :, 0: self.signal.shape[0], 0: self.signal.shape[1]]
-        signal = signal.squeeze(0).squeeze(0)
-        signal = signal.detach().cpu().numpy()
-        self.signal = pd.DataFrame(signal, index=self.signal.index)
+        if lines is not None:
+            print(f'{len(lines)} lines are detected')
+            self.lines = lines.squeeze()
+            self.__line_df()
+
+    def __line_df(self) -> None:
+        """Infer properties from the detected lines such as speed, time, ...
+        """
+        # Calculate additional values for each line
+        lines_with_info = []
+
+        for line in self.lines:
+            x1, y1, x2, y2 = line
+
+            # length of the line
+            length = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+
+            # angle of the line with the horizontal (note where is the origin)
+            angle = np.arctan2(y2 - y1, x2 - x1)
+            with warnings.catch_warnings():  # ignore warning if y2 - y1 == 0
+                warnings.filterwarnings(
+                    'ignore',
+                    message='divide by zero encountered in scalar divide')
+                speed = ((x2 - x1) / (y2 - y1)) * self.sampling_rate * 3.6
+
+            # distance from the origin to the line (top right)
+            # distance = np.abs((x2 - x1) * (y1 - 0) - (y2 - y1) * (x1 - 0)) /
+            # np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+
+            # ignore warning if angle=+-pi/2, so np.tan(angle) gets infinitive
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    'ignore',
+                    message='invalid value encountered in cast')
+                # intersection with left vertical boundary
+                left_intersection = np.int32(y1 + (0 - x1) * np.tan(angle))
+                left_intersection = self.start + timedelta(
+                    seconds=left_intersection / self.sampling_rate)
+
+                # intersection with middle vertical
+                middle_intersection = np.int32(
+                    y1 + (int(self.signal.shape[1]) / 2 - x1) * np.tan(angle))
+                middle_intersection = self.start + timedelta(
+                    seconds=middle_intersection / self.sampling_rate)
+
+                # intersection with right vertical boundary
+                right_intersection = np.int32(
+                    y1 + (int(self.signal.shape[1]) - x1) * np.tan(angle))
+                right_intersection = self.start + timedelta(
+                    seconds=right_intersection / self.sampling_rate)
+
+            # Append the additional values to the line
+            lines_with_info.append(np.array([
+                x1, y1, x2, y2,
+                length, angle, speed,
+                left_intersection,
+                middle_intersection,
+                right_intersection
+            ]))
+
+        # concadinate to a data frame
+        #######################################################################
+        lines_df = (
+            pd.DataFrame(
+                lines_with_info,
+                columns=[
+                    'x1', 'y1', 'x2', 'y2',
+                    'length', 'angle', 'speed',
+                    'left', 'middle', 'right']
+            )
+            .sort_values('middle')
+            .reset_index(drop=True)
+            )
+
+        self.lines_df = lines_df
+
+    def mean(self) -> None:
+        self.signal
 
     def fft(self):
         """Fourier transform
@@ -992,34 +1171,4 @@ class Dasly:
 
 
 if __name__ == "__main__":
-
-    periods = [
-        (111545, 111630),  # first drop 111551
-        # (103540, 104010),
-        # (104730, 105911),
-        # (105935, 110455),
-    ]
-    periods_split = helper.split_periods(periods=periods, time_span=10)
-
-    # Run the flow at every small period
-    ###########################################################################
-    for period in periods_split:
-        das = Dasly()
-        das.load_data(
-            folder_path='../data/raw/Campus_test_20230628_2kHz/',
-            start=period[0],
-            end=period[1]
-        )
-        das.high_pass_filter()
-        das.low_pass_filter()
-        das.decimate()
-        das.signal = das.signal.iloc[200:, 50:]
-        das.signal_decimate = das.signal_decimate.iloc[200:, 50:]
-        # das.gauss_filter()
-        das.detect_events(
-            plot=False,
-            threshold=5e-8,
-            eps=50,
-            min_samples=50
-        )
-        das.save_events()
+    das = Dasly()

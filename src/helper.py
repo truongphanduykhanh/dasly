@@ -81,9 +81,9 @@ def cal_cov_mat(s1: float, s2: float, std_space: float) -> np.matrix:
         deviation.
 
     Args:
-        s1 (float): Low speed limit
-        s2 (float): High speed limit
-        std_space (float): Space standard deviation
+        s1 (float): Low speed limit in km/h
+        s2 (float): High speed limit in km/h
+        std_space (float): Standard deviation along the space axis
 
     Returns:
         np.matrix: Covariance matrix
@@ -387,3 +387,41 @@ def largest_smaller_than_threshold(
         return max(filtered_values)
     else:
         return None  # If there are no values smaller than threshold
+
+
+def generate_list_time(
+    start: str,
+    end: str,
+    interval: int,
+    format: str = '%Y%m%d %H%M%S'
+) -> list:
+    """Gnerate list of time strings.
+
+    Args:
+        start (str): Start time.
+        end (str): End time, excluded.
+        interval (int): Gap in seconds between the time.
+        format (str, optional): Format. Defaults to '%Y%m%d %H%M%S'.
+
+    Returns:
+        list: List of time strings
+    """
+
+    # convert string to datetime objects
+    start = datetime.strptime(start, format)
+    end = datetime.strptime(end, format)
+
+    # ttime interval
+    interval = timedelta(seconds=interval)
+
+    # Generate a list of time values
+    time_values = []
+
+    current_time = start
+    while current_time < end:
+        time_values.append(current_time)
+        current_time += interval
+
+    # convert back to string
+    time_values_str = [time.strftime(format) for time in time_values]
+    return time_values_str
