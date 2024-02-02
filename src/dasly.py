@@ -14,8 +14,6 @@ import scipy
 from scipy import fft
 from scipy.signal import butter, sosfilt, decimate
 from scipy.ndimage import convolve
-import sklearn
-from sklearn.cluster import DBSCAN
 from matplotlib import colors
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -41,23 +39,18 @@ class Dasly:
         self.file_paths: list[str] = None
         self.signal_raw: pd.DataFrame = None
         self.signal: pd.DataFrame = None
-        self.signal_decimate: pd.DataFrame = None
-        self.events: np.ndarray = None
-        self.events_df: pd.DataFrame = None
-        self.cluster: sklearn.cluster._dbscan.DBSCAN = None
         self.sampling_rate: int = None
         self.duration: int = None
-        self.data_type: str = None
-        self.channel: float = 1.0  # meter between two consecutive channels
-        self.lines: np.ndarray = None
+        self.lines: pd.DataFrame = None
 
     def update_sampling_rate(self) -> None:
         self.sampling_rate = len(self.signal) / self.duration
 
     def reset(self) -> None:
-        """Reset all transformations on signal
+        """Reset all attributes and transformations on signal.
         """
         self.signal = self.signal_raw
+        self.lines = None
         self.update_sampling_rate()
 
     # @staticmethod
@@ -317,7 +310,6 @@ class Dasly:
             signal.index = pd.to_datetime(signal.index).time
         self.signal_raw = signal  # immutable attribute
         self.signal = signal  # mutable attribute, that can be changed later
-        self.data_type = 'float'
         self.update_sampling_rate()
 
     def bandpass_filter(
@@ -488,7 +480,7 @@ class Dasly:
         self,
         quantile: float = 0.90,
         threshold: float = None,
-        by_column: bool = True,
+        by_column: bool = False,
         inplace: bool = True,
     ) -> Union[None, pd.DataFrame]:
         """Transform data to binary. First take absolute value. Then map to 1
@@ -498,9 +490,9 @@ class Dasly:
             quantile (float, optional): Quantile as a threshold. Defaults to
                 0.90.
             threshold (float, optional): Threshold value, apply one threshold
-                to all data frame.
+                to all data frame. Defaults to None.
             by_column (bool, optional): get binary by applying different
-                thresholds for every column.
+                thresholds for every column. Defaults to False.
             inplace (bool, optional): If overwrite attribute signal. Defaults
                 to True.
 
@@ -574,8 +566,8 @@ class Dasly:
 
     def gauss_filter(
         self,
-        s1: float = 80,
-        s2: float = 85,
+        s1: float = 85,
+        s2: float = 90,
         std_space: float = 10,
         cov_mat: np.ndarray = None,
         inplace: bool = True
@@ -588,8 +580,8 @@ class Dasly:
             shape alike application.
 
         Args:
-            s1 (float, optional): Lower speed limit. Defaults to 80.
-            s2 (float, optional): Upper speed limit. Defaults to 85.
+            s1 (float, optional): Lower speed limit. Defaults to 85.
+            s2 (float, optional): Upper speed limit. Defaults to 90.
             std_space (float, optional): Standard deviation along space axis.
                 Defaults to 10.
             cov_mat (np.ndarray, optional):  The covariance matrix has the form
@@ -660,13 +652,17 @@ class Dasly:
         sobel_y = convolve(self.signal.values, sobel_kernel_y)
 
         # Filter only possitive gradients
-        sobel_x_positive = np.maximum(sobel_x, 0)
-        sobel_y_positive = np.maximum(sobel_y, 0)
+        sobel_x = np.maximum(sobel_x, 0)
+        sobel_y = np.maximum(sobel_y, 0)
 
         # Calculate the magnitude of the gradient
-        gradient_magnitude = np.sqrt(sobel_x_positive**2 + sobel_y_positive**2)
+        gradient_magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
+
         signal_sobel = pd.DataFrame(
-            gradient_magnitude, index=self.signal.index)
+            gradient_magnitude,
+            index=self.signal.index
+        )
+
         # return
         #######################################################################
         if inplace:
@@ -786,7 +782,7 @@ class Dasly:
         else:
             cmap = 'RdBu'
             if (vmin is None) or (vmax is None):
-                percentile = np.quantile(np.abs(self.signal), 0.95)
+                percentile = np.quantile(np.abs(data), 0.95)
                 vmin = - percentile
                 vmax = percentile
                 print(f'vmin: {vmin:.3g}, vmax: {vmax:.3g}')
@@ -808,11 +804,11 @@ class Dasly:
             norm=norm,
             interpolation='none',  # no interpolation
             # to see the last values of x-axis
-            extent=[0, self.signal.shape[1], 0, self.signal.shape[0]],
+            extent=[0, data.shape[1], 0, data.shape[0]],
             origin='lower'
         )
         if self.lines is not None:
-            for line in self.lines:
+            for line in self.lines.iloc[:, 0:4].values:  # loop over the lines
                 x1, y1, x2, y2 = line
                 plt.plot([x1, x2], [y1, y2])
 
@@ -847,15 +843,15 @@ class Dasly:
         plt.xticks(channel_positions, channel_labels, rotation=60)
 
         # if data_type == 'category':
-        #     plt.colorbar()
+        plt.colorbar()
 
-    def hough_transform(self) -> None:
+    def hough_transform(self, time=30) -> None:
         """Apply Hough transform to detect lines in the data.
         """
         # angle resolution (theta)
         #######################################################################
-        average_speed = 80  # in km/h
-        speed_resolution = 0.1
+        average_speed = 85  # in km/h
+        speed_resolution = 0.2
         # angle in radian
         angle1 = math.atan(self.sampling_rate / (average_speed / 3.6))
         angle2 = math.atan(
@@ -867,7 +863,7 @@ class Dasly:
         # mimimum time in seconds a vehicle needs to be on the bridge to be
         # detected. The higher this value is, the more accurate the detection,
         # but the larger the delay of detection (need to wait longer)
-        time = 8  # in second
+        # time = 30  # in second
         distance = average_speed / 3.6 * time  # in meter
         length = np.sqrt((time * self.sampling_rate) ** 2 + distance ** 2)
 
@@ -876,13 +872,13 @@ class Dasly:
             rho=1,  # distance resolution
             # angle resolution in radian need to have speed resolution ~0.1k/m
             theta=angle_resolution,
-            threshold=int(0.8 * length),  # needs to covert 80% of the length
-            minLineLength=0.5 * length,  # needs to at least 50% of the length
+            threshold=int(0.5 * length),  # needs to covert 50% of the length
+            minLineLength=0.8 * length,  # needs to at least 80% of the length
             maxLineGap=0.2 * length  # must not interupt > 20% of the length
         )
         if lines is not None:
             print(f'{len(lines)} lines are detected')
-            self.lines = lines.squeeze()
+            self.lines = np.squeeze(lines, axis=1)
             self.__line_df()
 
     def __line_df(self) -> None:
@@ -890,7 +886,6 @@ class Dasly:
         """
         # Calculate additional values for each line
         lines_with_info = []
-
         for line in self.lines:
             x1, y1, x2, y2 = line
 
@@ -954,10 +949,7 @@ class Dasly:
             .reset_index(drop=True)
             )
 
-        self.lines_df = lines_df
-
-    def mean(self) -> None:
-        self.signal
+        self.lines = lines_df
 
     def fft(self):
         """Fourier transform
@@ -1053,122 +1045,131 @@ class Dasly:
         plt.yticks(y_positions, y_labels)
         plt.ylabel('Frequency f')
 
-    def detect_events(
-            self,
-            eps: float = 100,
-            min_samples: int = 100
-    ) -> None:
-        """Detect events.
-
-        Args:
-            eps (float, optional): _description_. Defaults to 3.
-            min_samples (int, optional): _description_. Defaults to 2.
-        """
-        SPEED_MS = 1  # 25meter ~ 1 second
-        # Detect events
-        #######################################################################
-        points = np.argwhere(self.signal.values == 1)
-        points = points * np.array([SPEED_MS / self.sampling_rate, 1])
-        cluster = DBSCAN(
-            eps=eps,
-            min_samples=min_samples,
-            metric='euclidean'
-        )
-        cluster = cluster.fit(points)
-        # replace the cluster label to the signal data
-        self.signal.replace(0, np.nan, inplace=True)
-        points = points / np.array([SPEED_MS / self.sampling_rate, 1])
-        points = points.astype(int)
-        for i in range(len(points)):
-            self.signal.iloc[points[i][0], points[i][1]] = cluster.labels_[i]
-        events = (
-            pd.DataFrame(points, columns=['Time', 'Channel'])
-            .assign(Cluster=cluster.labels_)
-            .groupby('Cluster')
-            .agg({
-                'Time': 'min',
-                'Channel': ['mean', 'count']})
-            .round(0)
-            .astype(int)
-        )
-        events.columns = ['Time', 'Channel', 'Count']
-        self.points = points
-        self.cluster = cluster
-        self.events = events
-
-    def save_events(
-            self,
-            folder_path: str = '../data/interim/',
-            event_time: float = 0.2,
-            event_space: float = 50,
-    ) -> None:
-        """Save events in separated hdf5 files.
-
-        Args:
-            folder_path (str, optional): _description_. Defaults to
-                '../data/interim/'.
-            event_time (float, optional): _description_. Defaults to 4.
-            event_space (float, optional): _description_. Defaults to 50.
-        """
-        cluster = self.events_df.index.to_list()
-        if -1 in cluster:
-            cluster.remove(-1)
-        for i in cluster:
-            # Find time and space center
-            ###################################################################
-            time_center = self.events_df.loc[i]['Time']
-            space_center = self.events_df.loc[i]['Channel']
-            # Move the region if the center is too close to the border
-            ###################################################################
-            # if time_center - (event_time/2)*self.frequency < 0:
-            #     time_bottom = 0
-            #     time_top = event_time * self.frequency
-            # elif time_center + (event_time/2)*self.frequency > \
-            #         len(self.signal):
-            #     time_top = len(self.signal)
-            #     time_bottom = len(self.signal) - (event_time * self.frequency)
-            # else:
-            #     time_bottom = time_center - (event_time/2)*self.frequency
-            #     time_top = time_center + (event_time/2)*self.frequency
-
-            if time_center < 0:
-                time_bottom = 0
-                time_top = event_time * self.sampling_rate
-            elif time_center > len(self.signal):
-                time_top = len(self.signal)
-                time_bottom = len(self.signal) - (event_time * self.sampling_rate)
-            else:
-                time_bottom = time_center - (1/8) * event_time * self.sampling_rate
-                time_top = time_center + (7/8) * event_time * self.sampling_rate
-
-            if space_center - event_space/2 < 0:
-                space_left = 0
-                space_right = event_space
-            elif space_center + event_space/2 > self.signal.shape[1]:
-                space_right = self.signal.shape[1]
-                space_left = self.signal.shape[1] - event_space
-            else:
-                space_left = space_center - event_space/2
-                space_right = space_center + event_space/2
-            # Find region around the center
-            ###################################################################
-            data_cut = (
-                self.signal_decimate.iloc[
-                    round(time_bottom): round(time_top),
-                    round(space_left): round(space_right)
-                ]
-            )
-            # Save the data frame to file
-            ###################################################################
-            time_center_name = (
-                self.signal.index[time_center]
-                .strftime('%H%M%S')
-            )
-            space_center_name = f'{space_center:03d}'
-            cluster_name = f'{i:02d}'
-            file_name = f'{folder_path}{time_center_name}_{space_center_name}_{cluster_name}.hdf5'
-            data_cut.to_hdf(file_name, key='abc')
-
 
 if __name__ == "__main__":
-    das = Dasly()
+
+    from tqdm import tqdm
+
+    start = '20231005 082445'
+    end = '20231005 110545'
+
+    starts = helper.generate_list_time(start, end, 10)
+
+    detect_lines = pd.DataFrame()
+
+    for i, start in enumerate(tqdm(starts)):
+        das = Dasly()
+        das.load_data(
+            folder_path=(
+                '/media/kptruong/yellow02/Aastfjordbrua/Aastfjordbrua/'),
+            start=start,
+            duration=60
+        )
+        # forward filter
+        #######################################################################
+        das.lowpass_filter(0.5)
+        das.decimate(sampling_rate=6)
+        das.gauss_filter(85, 90)
+        das.sobel_filter()
+        das.binary_filter(by_column=False, threshold=2.5e-8)
+
+        das.hough_transform()
+        if das.lines is not None:
+            das.lines = das.lines.loc[lambda df: df['speed'] > 0]
+            detect_lines = pd.concat([
+                detect_lines,
+                das.lines.assign(batch=das.start)
+            ])
+
+        # backward filter
+        #######################################################################
+        das.reset()
+        das.lowpass_filter(0.5)
+        das.decimate(sampling_rate=6)
+        das.gauss_filter(-90, -85)
+        das.sobel_filter()
+        das.binary_filter(by_column=False, threshold=2.5e-8)
+
+        das.hough_transform()
+        if das.lines is not None:
+            das.lines = das.lines.loc[lambda df: df['speed'] < 0]
+            detect_lines = pd.concat([
+                detect_lines,
+                das.lines.assign(batch=das.start)
+            ])
+
+    # export to csv file
+    ###########################################################################
+    start = '_'.join(start.split())
+    end = '_'.join(end.split())
+    detect_lines.to_csv(f'lines_{start}_{end}_3.csv', index=False)
+
+    # from tqdm import tqdm
+
+    # start = '20231005 082445'
+    # end = '20231005 110545'
+
+    # starts = helper.generate_list_time(start, end, 10)
+
+    # detect_lines = pd.DataFrame()
+
+    # for i, start in enumerate(tqdm(starts)):
+    #     das = Dasly()
+    #     das.load_data(
+    #         folder_path=(
+    #             '/media/kptruong/yellow02/Aastfjordbrua/Aastfjordbrua/'),
+    #         start=start,
+    #         duration=60
+    #     )
+    #     # forward filter
+    #     #######################################################################
+    #     das.lowpass_filter(0.5)
+    #     das.decimate(sampling_rate=6)
+    #     das.gauss_filter(85, 90)
+    #     das.sobel_filter()
+
+    #     # background noise
+    #     try:  # calculate weighted mean and weighted std
+    #         step_mean = np.mean(np.abs(das.signal), axis=0)
+    #         step_std = np.std(np.abs(das.signal), axis=0)
+    #         mean = step_mean * (1 / (i + 1)) + mean * (i / (i + 1))
+    #         std = step_std * (1 / (i + 1)) + std * (i / (i + 1))
+    #     except NameError:  # for the first iteration
+    #         mean = np.mean(np.abs(das.signal), axis=0)
+    #         std = np.std(np.abs(das.signal), axis=0)
+
+    #     threshold = mean + scipy.stats.norm.ppf(0.90) * std
+    #     binany_forward = (np.abs(das.signal) >= threshold).astype(np.uint8)
+    #     das.signal = binany_forward
+
+    #     das.hough_transform()
+    #     if das.lines is not None:
+    #         das.lines = das.lines.loc[lambda df: df['speed'] > 0]
+    #         detect_lines = pd.concat([
+    #             detect_lines,
+    #             das.lines.assign(batch=das.start)
+    #         ])
+
+    #     # backward filter
+    #     #######################################################################
+    #     das.reset()
+    #     das.lowpass_filter(0.5)
+    #     das.decimate(sampling_rate=6)
+    #     das.gauss_filter(-90, -85)
+    #     das.sobel_filter()
+    #     binany_backward = (np.abs(das.signal) >= threshold).astype(np.uint8)
+    #     das.signal = binany_backward
+
+    #     das.hough_transform()
+    #     if das.lines is not None:
+    #         das.lines = das.lines.loc[lambda df: df['speed'] < 0]
+    #         detect_lines = pd.concat([
+    #             detect_lines,
+    #             das.lines.assign(batch=das.start)
+    #         ])
+
+    # # export to csv file
+    # ###########################################################################
+    # start = '_'.join(start.split())
+    # end = '_'.join(end.split())
+    # detect_lines.to_csv(f'lines_{start}_{end}_2.csv', index=False)
