@@ -1,0 +1,6 @@
+input_dir: /mnt/Datastore/usr/kptruong/astfjordbrua
+output_dir: /mnt/Datastore/usr/kptruong/dasly
+batch_hdf5: 10  # time length of each hdf5 file, in seconds (this is fixed)
+dasly:
+  batch: 60  # time length of each batch, in seconds
+  overlap: 10  # overlap between batches, in seconds (multiples of batch_hdf5)

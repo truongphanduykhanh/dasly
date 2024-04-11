@@ -217,7 +217,7 @@ def heatmap_filter(filter_arr: np.ndarray, sampling_rate: int = 1000) -> None:
         vmax=vmax,
         vcenter=(vmin + vmax) / 2
     )
-    cmap = 'Blues'
+    cmap = 'Greens'
     plt.imshow(
         X=filter_arr,
         aspect=filter_arr.shape[1] / filter_arr.shape[0],  # square
@@ -332,25 +332,6 @@ def split_periods(
         periods_split.extend(periods_i)
     return periods_split
 
-
-def files_in_folder(folder_path: str) -> list[str]:
-    """List all files in a folder
-
-    Args:
-        folder_path (str): Folder path
-
-    Returns:
-        list[str]: all files
-    """
-    file_list = []
-    for root, dirs, files in os.walk(folder_path):
-        for file in files:
-            file_list.append(os.path.join(root, file))
-    return file_list
-
-
-# helper function
-#######################################################################
 def find_divisors(number: int) -> list[int]:
     """List all divisors of an integer number.
 
@@ -366,9 +347,6 @@ def find_divisors(number: int) -> list[int]:
             divisors.append(i)
     return divisors
 
-
-# helper function
-#######################################################################
 def largest_smaller_than_threshold(
     lst: list[float], threshold: float
 ) -> Union[float, None]:
@@ -425,3 +403,21 @@ def generate_list_time(
     # convert back to string
     time_values_str = [time.strftime(format) for time in time_values]
     return time_values_str
+
+
+def find_hdf5(folder_path: str) -> list[str]:
+    """All hdf5 files in a folder.
+
+    Args:
+        folder_path (str): Folder path.
+
+    Returns:
+        list[str]: List of file paths,
+    """
+    file_paths = []
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            file_paths.append(os.path.join(root, file))
+    file_paths = [file for file in file_paths if file.endswith('.hdf5')]
+    file_paths.sort()
+    return file_paths

@@ -24,7 +24,7 @@ import cv2
 from src import simpleDASreader, helper
 
 
-sns.set()
+sns.set_theme()
 warnings.filterwarnings('ignore', category=pd.io.pytables.PerformanceWarning)
 warnings.filterwarnings('ignore', 'is_categorical_dtype')
 # seaborn v0.13.0 has been released with these updates
@@ -34,17 +34,32 @@ warnings.filterwarnings('ignore', 'is_categorical_dtype')
 class Dasly:
 
     def __init__(self) -> None:
-        print("Welcome to Dasly!")
+        print('Welcome to Dasly!')
         # list of attributes
         self.file_paths: list[str] = None
         self.signal_raw: pd.DataFrame = None
         self.signal: pd.DataFrame = None
         self.sampling_rate: int = None
+        self.sampling_rate_channel: int = None
         self.duration: int = None
         self.lines: pd.DataFrame = None
+        self.channel = 1
 
     def update_sampling_rate(self) -> None:
-        self.sampling_rate = len(self.signal) / self.duration
+        """Update sampling rate of the data.
+        """
+        time_0 = self.signal.index[0]
+        time_1 = self.signal.index[1]
+        # Create datetime objects with a common date
+        common_date = datetime.today()
+        datetime0 = datetime.combine(common_date, time_0)
+        datetime1 = datetime.combine(common_date, time_1)
+        # Calculate the time difference
+        time_difference = datetime1 - datetime0
+        time_difference = time_difference.total_seconds()
+        time_difference = np.abs(time_difference)
+        sampling_rate = 1 / time_difference
+        self.sampling_rate = sampling_rate
 
     def reset(self) -> None:
         """Reset all attributes and transformations on signal.
@@ -52,111 +67,6 @@ class Dasly:
         self.signal = self.signal_raw
         self.lines = None
         self.update_sampling_rate()
-
-    # @staticmethod
-    # def get_all_file_paths(folder_path: str) -> list[str]:
-    #     """All hdf5 files in a folder
-
-    #     Args:
-    #         folder_path (str): Folder path
-
-    #     Returns:
-    #         list[str]: List of file paths
-    #     """
-    #     file_paths = []
-    #     for root, dirs, files in os.walk(folder_path):
-    #         for file in files:
-    #             file_paths.append(os.path.join(root, file))
-    #     file_paths = [file for file in file_paths if file.endswith('.hdf5')]
-    #     return file_paths
-
-    # @staticmethod
-    # def get_file_paths(
-    #     folder_path: str,
-    #     start: Union[str, datetime] = None,
-    #     end: Union[str, datetime] = None,
-    #     duration: int = None,
-    #     datatype: str = 'dphi',
-    # ) -> list[str]:
-    #     """Get file paths given the folder and time constraints.
-
-    #     Args:
-    #         folder_path (str): Experiment folder. Must inlcude date folders in
-    #             right next level.
-    #         start (Union[str, datetime], optional): Start time. If string, must
-    #             be in format YYMMDD HHMMSS. Defaults to None.
-    #         end (Union[str, datetime], optional): End time. If string, must be
-    #             in format YYMMDD HHMMSS. Defaults to None.
-    #         duration (int, optional): Duration of the time in seconds. Defaults
-    #             to None.
-
-    #     Returns:
-    #         list[str]: File paths.
-    #     """
-    #     sub_folders = [f.path for f in os.scandir(folder_path) if f.is_dir()]
-    #     try:
-    #         datetime.strptime(sub_folders[0].split('/')[-1], '%Y%m%d')
-    #     except (ValueError, IndexError):
-    #         warnings.warn(f"""Data folder does not follow standard format
-    #         folder/YYYYMMDD/{datatype}/HHMMSS.hdf5""", stacklevel=2)
-    #         file_paths = Dasly.get_all_file_paths(folder_path)
-    #         # Verbose
-    #         first_file = file_paths[0].split('/')[-1].split('.')[0]
-    #         last_file = file_paths[-1].split('/')[-1].split('.')[0]
-    #         print(
-    #             f'{len(file_paths)} files,from {first_file} to {last_file}')
-    #         return file_paths
-
-    #     # determine start, end, duration
-    #     start, end, duration = Dasly.infer_time(
-    #         start=start,
-    #         end=end,
-    #         duration=duration
-    #     )
-    #     start_date = start.strftime('%Y%m%d')
-    #     end_date = end.strftime('%Y%m%d')
-    #     start_date_time = start.strftime('%Y%m%d %H%M%S')
-    #     end_date_time = end.strftime('%Y%m%d %H%M%S')
-
-    #     # determine file paths within the dates
-    #     sub_folders = [f.path for f in os.scandir(folder_path) if f.is_dir()]
-    #     dates = [f.split('/')[-1] for f in sub_folders]
-    #     dates = [d for d in dates if d >= start_date and d <= end_date]
-    #     file_paths = []
-    #     for date in dates:
-    #         folder_path_date = os.path.join(folder_path, date, datatype)
-    #         file_paths_date = Dasly.get_all_file_paths(folder_path_date)
-    #         file_paths.extend(file_paths_date)
-
-    #     # filter file paths within the time
-    #     file_dates = [file.split('/')[-3] for file in file_paths]
-    #     file_times = [file.split('/')[-1].split('.')[0] for file in file_paths]
-    #     file_dates_times = [
-    #         ' '.join([date, time])
-    #         for date, time in zip(file_dates, file_times)]
-    #     file_filter = [
-    #         x for x in file_dates_times
-    #         if x >= start_date_time and x < end_date_time]
-    #     file_filter.sort()
-    #     if file_filter[0] > start_date_time:  # not cover yet the start time
-    #         min_idx = file_dates_times.index(file_filter[0])
-    #         if min_idx != 0:  # if the min_idx is already 0, ignore
-    #             file_filter.insert(0, file_dates_times[min_idx - 1])
-
-    #     # re-create the path from date time
-    #     file_filter_split = [s.split(' ') for s in file_filter]
-    #     file_filter_paths = [
-    #         os.path.join(folder_path, s[0], datatype, s[1]) + '.hdf5'
-    #         for s in file_filter_split]
-    #     file_filter_paths
-
-    #     # Verbose
-    #     first_file = file_filter_paths[0].split('/')[-1].split('.')[0]
-    #     last_file = file_filter_paths[-1].split('/')[-1].split('.')[0]
-    #     print(
-    #         f'{len(file_filter_paths)} files,from {first_file} to {last_file}')
-
-    #     return file_filter_paths
 
     @staticmethod
     def infer_time(
@@ -247,7 +157,8 @@ class Dasly:
 
     def load_data(
         self,
-        folder_path: str,
+        folder_path: str = None,
+        file_paths: list[str] = None,
         start: Union[str, datetime] = None,
         duration: int = None,
         end: Union[str, datetime] = None,
@@ -257,7 +168,9 @@ class Dasly:
 
         Args:
             folder_path (str): Experiment folder. Must inlcude date folders in
-                right next level.
+                right next level. Defaults to None.
+            file_paths (str): File paths. If folder_path and file_paths are
+                inputted, prioritize to use file_paths. Defaults to None.
             start (Union[str, datetime], optional): Start time. If string, must
                 be in format YYMMDD HHMMSS, specify in argument format
                 otherwise. Defaults to None.
@@ -269,24 +182,21 @@ class Dasly:
             format (str, optional): Format of start, end. Defaults to
                 '%Y%m%d %H%M%S'.
         """
-        # Infer time
-        #######################################################################
-        start, duration, end = Dasly.infer_time(
-            start=start,
-            duration=duration,
-            end=end
-        )
-        self.start = start
-        self.duration = duration
-        self.end = end
-        # Get files paths
-        #######################################################################
-        file_paths = Dasly.get_file_paths(
-            folder_path=folder_path,
-            start=start,
-            duration=duration
-        )
-        self.file_paths = file_paths
+        if file_paths is None:
+            # Infer time
+            ###################################################################
+            start, duration, end = Dasly.infer_time(
+                start=start,
+                duration=duration,
+                end=end
+            )
+            # Get files paths
+            ###################################################################
+            file_paths = Dasly.get_file_paths(
+                folder_path=folder_path,
+                start=start,
+                duration=duration
+            )
         # Load files
         #######################################################################
         signal = simpleDASreader.load_DAS_files(
@@ -300,10 +210,14 @@ class Dasly:
             userSensitivity=None  # default
         )
         signal = pd.DataFrame(signal)
+        # signal = signal.loc[:, 50000: 100000-1]
         # Transform dataframe
         #######################################################################
-        signal = signal[start:end]  # extact only the range start-end
-        signal = signal.iloc[:-1]  # drop the last record (new second already)
+        if file_paths is None:
+            signal = signal[start:end]  # extact only the range start-end
+            signal = signal.iloc[:-1]  # drop the last record (new second)
+        self.start = np.min(signal.index)
+        self.end = np.max(signal.index)
         # if the data is within one day, just keep the time as index
         # because keeping date makes the index unnecessarily long
         if pd.Series(signal.index).dt.date.nunique() == 1:
@@ -311,6 +225,8 @@ class Dasly:
         self.signal_raw = signal  # immutable attribute
         self.signal = signal  # mutable attribute, that can be changed later
         self.update_sampling_rate()
+        self.duration = len(signal) * (1 / self.sampling_rate)
+        self.file_paths = file_paths
 
     def bandpass_filter(
         self,
@@ -338,7 +254,8 @@ class Dasly:
         signal_bandpass = sosfilt(sos, self.signal, axis=0)
         signal_bandpass = pd.DataFrame(
             signal_bandpass,
-            index=self.signal.index
+            index=self.signal.index,
+            columns=self.signal.columns
         )
         # return
         #######################################################################
@@ -368,7 +285,11 @@ class Dasly:
         cutoff = cutoff / nyquist
         sos = butter(order, cutoff, btype='low', output='sos')
         signal_lowpass = sosfilt(sos, self.signal, axis=0)
-        signal_lowpass = pd.DataFrame(signal_lowpass, index=self.signal.index)
+        signal_lowpass = pd.DataFrame(
+            signal_lowpass,
+            index=self.signal.index,
+            columns=self.signal.columns
+        )
         # return
         #######################################################################
         if inplace:
@@ -378,7 +299,9 @@ class Dasly:
 
     def sample(
         self,
-        factor: int,
+        seconds: int,
+        channels: int,
+        func_name: str = 'mean',
         inplace: bool = True
     ) -> Union[None, pd.DataFrame]:
         """Down-sampling according to time (rows).
@@ -393,18 +316,38 @@ class Dasly:
             Union[None, pd.DataFrame]: pd.DataFrame if inplace=False.
         """
         # create antificial groups
-        groups = np.arange(len(self.signal)) // factor
-        # calculate means by group
-        signal = self.signal.groupby(groups).mean()
-        # take correct index
-        signal.index = self.signal.iloc[::factor, :].index
+        factor_rows = seconds * self.sampling_rate
+        group_rows = np.arange(len(self.signal)) // factor_rows
+
+        channels_gap = self.signal.columns[1] - self.signal.columns[0]
+        factor_columns = channels / channels_gap
+        group_columns = np.arange(len(self.signal.columns)) // factor_columns
+
+        signal_sample = self.signal.copy()
+        signal_sample.index = group_rows
+        signal_sample.columns = group_columns
+
+        # group by rows and columns
+        #######################################################################
+        signal_sample = (
+            signal_sample
+            .stack()
+            .groupby(level=[0, 1])
+            .agg(func_name)
+            .unstack()
+        )
+        # update indices and columns
+        #######################################################################
+        signal_sample.index = self.signal.index[::int(factor_rows)]
+        signal_sample.columns = self.signal.columns[::int(factor_columns)]
+
         # return
         #######################################################################
         if inplace:
-            self.signal = signal
+            self.signal = signal_sample
             self.update_sampling_rate()
         else:
-            return signal
+            return signal_sample
 
     def decimate(
         self,
@@ -465,7 +408,11 @@ class Dasly:
         #######################################################################
         idx = slice(0, len(self.signal.index), factor_adjusted)
         idx = self.signal.index[idx]
-        signal_decimate = pd.DataFrame(signal_decimate, index=idx)
+        signal_decimate = pd.DataFrame(
+            signal_decimate,
+            index=idx,
+            columns=self.signal.columns
+        )
         # return
         #######################################################################
         if inplace:
@@ -625,7 +572,9 @@ class Dasly:
         signal_gaussian = signal_gaussian.detach().cpu().numpy()
         signal_gaussian = pd.DataFrame(
             signal_gaussian,
-            index=self.signal.index)
+            index=self.signal.index,
+            columns=self.signal.columns
+        )
         # return
         #######################################################################
         if inplace:
@@ -660,7 +609,8 @@ class Dasly:
 
         signal_sobel = pd.DataFrame(
             gradient_magnitude,
-            index=self.signal.index
+            index=self.signal.index,
+            columns=self.signal.columns
         )
 
         # return
@@ -791,9 +741,6 @@ class Dasly:
             vmax=vmax,
             vcenter=(vmin + vmax) / 2
         )
-        # if data_type == 'category':
-        #     cmap = 'tab10'
-        #     norm = None
 
         # plot heatmap
         #######################################################################
@@ -842,7 +789,6 @@ class Dasly:
         channel_labels = channels[::column_gap]
         plt.xticks(channel_positions, channel_labels, rotation=60)
 
-        # if data_type == 'category':
         plt.colorbar()
 
     def hough_transform(self, time=30) -> None:
