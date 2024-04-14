@@ -101,8 +101,8 @@ class Dasly:
         # Check number of argument
         #######################################################################
         if (start is None) + (duration is None) + (end is None) != 1:
-            raise ValueError("The function accepts two and only two out of \
-                             three (start, end, duration)")
+            raise ValueError("The function accepts two and only two out of "
+                             "three (start, end, duration)")
         # Transform string to datetime type if string is inputted
         #######################################################################
         if isinstance(start, str):
@@ -183,6 +183,7 @@ class Dasly:
                 '%Y%m%d %H%M%S'.
         """
         if file_paths is None:
+            inter_time = True  # use for slicing the data later
             # Infer time
             ###################################################################
             start, duration, end = Dasly.infer_time(
@@ -210,11 +211,10 @@ class Dasly:
             userSensitivity=None  # default
         )
         signal = pd.DataFrame(signal)
-        # signal = signal.loc[:, 50000: 100000-1]
         # Transform dataframe
         #######################################################################
-        if file_paths is None:
-            signal = signal[start:end]  # extact only the range start-end
+        if inter_time:
+            signal = signal.loc[start:end]  # extact only the range start-end
             signal = signal.iloc[:-1]  # drop the last record (new second)
         self.start = np.min(signal.index)
         self.end = np.max(signal.index)
@@ -385,8 +385,8 @@ class Dasly:
             (sampling_rate is None)
         ) != 2:
             raise ValueError(
-                "The function accepts one and only one out of three \
-                    (factor, frequency, sampling_rate)")
+                "The function accepts one and only one out of three "
+                "(factor, frequency, sampling_rate)")
 
         # decimating
         #######################################################################

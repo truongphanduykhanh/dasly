@@ -1,5 +1,5 @@
-input_dir: /mnt/Datastore/usr/kptruong/astfjordbrua
-output_dir: /mnt/Datastore/usr/kptruong/aastfjordbrua-output
+input_dir: /mnt/Datastore/usr/kptruong/dasly/test/test_aastfjordbrua_input
+output_dir: /mnt/Datastore/usr/kptruong/dasly/test/test_aastfjordbrua_output
 batch_hdf5: 10  # length of each hdf5 file, in seconds (this is fixed)
 dasly:
   batch: 60  # length of each batch, in seconds

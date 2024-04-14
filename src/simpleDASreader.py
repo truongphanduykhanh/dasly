@@ -6,7 +6,7 @@ simpleDASreader v8.0 - OptoDAS raw file v8 reader for Python.
     Vestre Rosten 77, 7075 Tiller, Norway, https://www.asn.com/
 
     This file is part of simpleDASreader.
- 
+
     simpleDASreader is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
