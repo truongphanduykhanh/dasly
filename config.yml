@@ -3,4 +3,19 @@ output_dir: /mnt/Datastore/usr/kptruong/dasly/test/test_aastfjordbrua_output
 batch_hdf5: 10  # length of each hdf5 file, in seconds (this is fixed)
 dasly:
   batch: 60  # length of each batch, in seconds
-  batch_gap: 30  # gap between the batch, in seconds, multiple of batch_hdf5
+  batch_gap: 10  # gap between the batch, in seconds, multiple of batch_hdf5
+  low_speed_limit: 40  # speed limit, in km/h
+  high_speed_limit: 130  # speed limit, in km/h
+
+low_pass_freq: 0.5
+
+decimate:
+  sampling_rate: 6
+
+gauss_filter:
+  s1: 80
+  s2: 85
+  std: 10
+
+binary_threshold: 2.5e-8
+dbscan_eps: 1

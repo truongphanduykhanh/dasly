@@ -14,6 +14,7 @@ import scipy
 from scipy import fft
 from scipy.signal import butter, sosfilt, decimate
 from scipy.ndimage import convolve
+from sklearn.cluster import DBSCAN
 from matplotlib import colors
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -554,11 +555,11 @@ class Dasly:
         signal_tensor = torch.tensor(
             self.signal.values.copy(),
             dtype=torch.float32
-        ).to('cuda')
+        )
         filter_tensor = torch.tensor(
             gauss_filter,
             dtype=torch.float32
-        ).to('cuda')
+        )
         pad_t = np.floor(filter_tensor.shape[0] / 2).astype(int)
         pad_s = np.floor(filter_tensor.shape[1] / 2).astype(int)
         signal_gaussian = F.conv2d(
@@ -818,8 +819,8 @@ class Dasly:
             rho=1,  # distance resolution
             # angle resolution in radian need to have speed resolution ~0.1k/m
             theta=angle_resolution,
-            threshold=int(0.5 * length),  # needs to covert 50% of the length
-            minLineLength=0.8 * length,  # needs to at least 80% of the length
+            threshold=int(0.5 * length),  # needs to cover 50% of the length
+            minLineLength=0.7 * length,  # needs to at least 70% of the length
             maxLineGap=0.2 * length  # must not interupt > 20% of the length
         )
         if lines is not None:
@@ -896,6 +897,40 @@ class Dasly:
             )
 
         self.lines = lines_df
+
+    @staticmethod
+    def __metric(x: Union[np.array, list], y: Union[np.array, list]) -> float:
+        distance = np.abs(np.array(x) - np.array(y)).mean()
+        return distance
+
+    def dbscan(self, eps: float = 2) -> None:
+        """Apply DBSCAN to cluster the lines.
+        """
+        if (self.lines is not None) and (len(self.lines) > 0):
+            reference = self.start.to_pydatetime()
+            lines = (
+                self.lines
+                .assign(left_seconds=lambda df:
+                        (df['left'] - reference).dt.total_seconds())
+                .assign(right_seconds=lambda df:
+                        (df['right'] - reference).dt.total_seconds())
+                .assign(middle_seconds=lambda df:
+                        (df['middle'] - reference).dt.total_seconds())
+            )
+
+            cluster = DBSCAN(
+                eps=eps,
+                min_samples=1,
+                metric=Dasly.__metric
+            )
+            cluster = cluster.fit(
+                lines[['left_seconds', 'right_seconds', 'middle_seconds']])
+            self.lines = (
+                self.lines.assign(cluser=cluster.labels_)
+                .groupby('cluser')
+                .mean()
+                .reset_index(drop=True)
+            )
 
     def fft(self):
         """Fourier transform
