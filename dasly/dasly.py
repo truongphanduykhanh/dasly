@@ -22,7 +22,7 @@ import torch
 import torch.nn.functional as F
 import cv2
 
-from src import simpleDASreader, helper
+from dasly import simpleDASreader, helper
 
 
 sns.set_theme()

@@ -17,7 +17,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from sklearn.cluster import DBSCAN
 
-from src import dasly
+from dasly import dasly
 
 
 # Parameters from the YAML file
@@ -230,15 +230,15 @@ class MyHandler(FileSystemEventHandler):
             return
         if (
             # Check if the event is a new file
-            event.event_type == 'created'
+            event.event_type == 'moved'
             # Check if the file is an HDF5 file
-            and event.src_path.endswith('.hdf5')
+            and (True if event.dest_path is not None else False)
             # Check if the file is not a duplicate (watchdog bug workaround)
-            and event.src_path != self.last_created
+            and event.dest_path != self.last_created
         ):
             time.sleep(1)  # Wait for the file to be completely written
-            print(f'New hdf5: {event.src_path}')
-            self.last_created = event.src_path  # Update the last created file
+            print(f'New hdf5: {event.dest_path}')
+            self.last_created = event.dest_path  # Update the last created file
             self.event_count += 1
             # if self.event_count >= self.event_thresh:
             #     print('Runing dasly...')
@@ -247,7 +247,7 @@ class MyHandler(FileSystemEventHandler):
             #     while attempts <= max_attempts:
             #         try:
             #             sys.stdout = open('/dev/null', 'w')  # Suppress print
-            #             file_dt = extract_dt(event.src_path)
+            #             file_dt = extract_dt(event.dest_path)
             #             first_file_dt = add_subtract_dt(file_dt, -batch+10)
             #             start, end, lines = run_dasly(
             #                 input_dir=input_dir,
@@ -284,7 +284,7 @@ class MyHandler(FileSystemEventHandler):
                 # while attempts <= max_attempts:
                 #     try:
                 # sys.stdout = open('/dev/null', 'w')  # Suppress print
-                file_dt = extract_dt(event.src_path)
+                file_dt = extract_dt(event.dest_path)
                 first_file_dt = add_subtract_dt(file_dt, -batch+10)
                 start, end, lines = run_dasly(
                     input_dir=input_dir,
