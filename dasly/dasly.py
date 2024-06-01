@@ -40,11 +40,7 @@ class Dasly:
         self.file_paths: list[str] = None
         self.signal_raw: pd.DataFrame = None
         self.signal: pd.DataFrame = None
-<<<<<<< HEAD
         self.sampling_rate: float = None
-=======
-        self.sampling_rate: int = None
->>>>>>> origin/main
         self.sampling_rate_channel: int = None
         self.duration: int = None
         self.lines: pd.DataFrame = None
