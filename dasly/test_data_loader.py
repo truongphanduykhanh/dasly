@@ -1,11 +1,19 @@
 import unittest
 from datetime import datetime
+<<<<<<< HEAD
 from dasly.data_loader import Loader
+=======
+from dasly.data_loader import Dasly
+>>>>>>> origin/main
 
 class TestDasly(unittest.TestCase):
 
     def setUp(self):
+<<<<<<< HEAD
         self.dasly = Loader()
+=======
+        self.dasly = Dasly()
+>>>>>>> origin/main
 
     def test_load_data_with_folder_path(self):
         folder_path = "/path/to/experiment/folder"
