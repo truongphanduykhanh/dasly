@@ -1,0 +1,8 @@
+Basketball first drop from Khanh:
+    Kit's video:    11:16:33
+    DAS data:       11:16:33.75
+    Tobias's video: 13:16:31 (32)
+
+
+Span of a basketball bounce: 0.15s x 50 channels (core 0.1s x 30 channels)
+Between 2 bounces: around 1s
