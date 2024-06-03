@@ -183,6 +183,7 @@ class Dasly:
             format (str, optional): Format of start, end. Defaults to
                 '%Y%m%d %H%M%S'.
         """
+        inter_time = False
         if file_paths is None:
             inter_time = True  # use for slicing the data later
             # Infer time

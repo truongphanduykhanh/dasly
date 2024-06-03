@@ -332,6 +332,7 @@ def split_periods(
         periods_split.extend(periods_i)
     return periods_split
 
+
 def find_divisors(number: int) -> list[int]:
     """List all divisors of an integer number.
 
@@ -346,6 +347,7 @@ def find_divisors(number: int) -> list[int]:
         if number % i == 0:
             divisors.append(i)
     return divisors
+
 
 def largest_smaller_than_threshold(
     lst: list[float], threshold: float

@@ -104,20 +104,20 @@ def get_file_paths(
 
 class DataLoader:
 
-    def __init__(self) -> None:
+    def __init__(self, ch_space: float = 1) -> None:
         """Initialize instance.
         """
         # list of attributes
         self.file_paths: list[str] = None
         self.signal_raw: pd.DataFrame = None
         self.signal: pd.DataFrame = None
-        self.sampling_rate: int = None
-        self.sampling_rate_channel: int = None
-        self.duration: int = None
-        self.channel = 1  # default channel
+        self.t_rate: int = None  # temporal sampling rate, in sample per second
+        self.s_rate: int = None  # spatial sampling rate, in sample per meter
+        self.duration: int = None  # duration of the data, in seconds
+        self.ch_space = ch_space  # distance between two channels, in meters
 
-    def _update_sampling_rate(self) -> None:
-        """Update sampling rate of the data.
+    def _update_t_rate(self) -> None:
+        """Update temporal sampling rate of the data.
         """
         time_0 = self.signal.index[0]
         time_1 = self.signal.index[1]
@@ -129,8 +129,29 @@ class DataLoader:
         time_diff = datetime1 - datetime0
         time_diff = time_diff.total_seconds()
         time_diff = np.abs(time_diff)
-        sampling_rate = 1 / time_diff
-        self.sampling_rate = sampling_rate
+        t_rate = 1 / time_diff
+        self.t_rate = t_rate
+
+    def _update_s_rate(self) -> None:
+        """Update spatial sampling rate of the data.
+        """
+        # Calculate the distance between two consecutive samples
+        distance = self.signal.columns[1] - self.signal.columns[0]
+        distance = np.abs(distance) * self.ch_space
+        self.s_rate = 1 / distance
+
+    def _update_duration(self) -> None:
+        """Update duration of the data.
+        """
+        self.duration = len(self.signal) * (1 / self.t_rate)
+
+    def reset(self) -> None:
+        """Reset all attributes and transformations on signal.
+        """
+        self.signal = self.signal_raw.copy()
+        self._update_t_rate()
+        self._update_s_rate()
+        self._update_duration()
 
     def load_data(
         self,
@@ -199,12 +220,7 @@ class DataLoader:
             signal.index = pd.to_datetime(signal.index).time
         self.signal_raw = signal  # immutable attribute
         self.signal = self.signal_raw.copy()  # mutable attribute
-        self._update_sampling_rate()
-        self.duration = len(self.signal) * (1 / self.sampling_rate)
         self.file_paths = file_paths
-
-    def reset(self) -> None:
-        """Reset all attributes and transformations on signal.
-        """
-        self.signal = self.signal_raw.copy()
-        self._update_sampling_rate()
+        self._update_t_rate()
+        self._update_s_rate()
+        self._update_duration()

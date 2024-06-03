@@ -8,14 +8,11 @@ from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
-import scipy
 from scipy.signal import butter, sosfilt
 from scipy.ndimage import convolve
 import cv2
 import torch
 import torch.nn.functional as F
-
-from dasly import helper
 
 
 # Set up logger
@@ -28,7 +25,8 @@ class DataFilter:
 
     def __init__(self):
         self.signal: pd.DataFrame = None
-        self.sampling_rate: float = None
+        self.t_rate: float = None
+        self.s_rate: float = None
 
     def bandpass_filter(
         self,
@@ -50,12 +48,12 @@ class DataFilter:
             Optional[pd.DataFrame]: Filtered signal as a DataFrame if
                 inplace=False.
         """
-        if not (0 < low < high < 0.5 * self.sampling_rate):
+        if not (0 < low < high < 0.5 * self.t_rate):
             error_msg = """Invalid frequency bounds.
             Ensure 0 < low < high < nyquist."""
             logger.error(error_msg)
             raise ValueError(error_msg)
-        nyquist = 0.5 * self.sampling_rate
+        nyquist = 0.5 * self.t_rate
         normalized_low = low / nyquist
         normalized_high = high / nyquist
         sos = butter(
@@ -96,12 +94,12 @@ class DataFilter:
             Optional[pd.DataFrame]: Filtered signal as a DataFrame if
                 inplace=False.
         """
-        if not (0 < cutoff < 0.5 * self.sampling_rate):
+        if not (0 < cutoff < 0.5 * self.t_rate):
             error_msg = """Invalid cutoff frequency.
             Ensure 0 < cutoff < nyquist."""
             logger.error(error_msg)
             raise ValueError(error_msg)
-        nyquist = 0.5 * self.sampling_rate
+        nyquist = 0.5 * self.t_rate
         normalized_cutoff = cutoff / nyquist
         sos = butter(order, normalized_cutoff, btype='low', output='sos')
         signal_lowpass = sosfilt(sos, self.signal, axis=0)
@@ -111,7 +109,6 @@ class DataFilter:
             columns=self.signal.columns
         )
         # return
-        #######################################################################
         if inplace:
             self.signal = signal_lowpass
             logger.info('Signal updated with low-pass filter.')
@@ -119,50 +116,48 @@ class DataFilter:
         else:
             return signal_lowpass
 
-    def binary_filter(
+    def binary_transform(
         self,
-        quantile: float = 0.90,
+        quantile: float = None,
         threshold: float = None,
-        by_column: bool = False,
         inplace: bool = True,
-    ) -> Union[None, pd.DataFrame]:
-        """Transform data to binary. First take absolute value. Then map to 1
-            if greater than or equal to threshold, 0 otherwise.
+    ) -> Optional[pd.DataFrame]:
+        """Transform the signal attribute to a binary DataFrame.
+
+        Takes the absolute value of the signal and maps it to 1 if it is
+        greater  than or equal to the threshold, otherwise maps to 0.
 
         Args:
-            quantile (float, optional): Quantile as a threshold. Defaults to
-                0.90.
-            threshold (float, optional): Threshold value, apply one threshold
-                to all data frame. Defaults to None.
-            by_column (bool, optional): get binary by applying different
-                thresholds for every column. Defaults to False.
-            inplace (bool, optional): If overwrite attribute signal. Defaults
-                to True.
+            quantile (float, optional): Quantile to compute threshold if no
+                threshold  is provided. Defaults to None.
+            threshold (float, optional): Fixed threshold value for the entire
+                DataFrame. If None, the quantile is used to compute the
+                threshold. Defaults to None.
+            inplace (bool, optional): If True, modifies the signal attribute
+                in place. Otherwise, returns a new DataFrame. Defaults to True.
 
         Returns:
-            Union[None, pd.DataFrame]: pd.DataFrame if inplace=False.
+            Optional[pd.DataFrame]: Returns a binary DataFrame if inplace is
+                False. Otherwise, returns None.
         """
-        # check arguments
-        #######################################################################
+        signal_abs = np.abs(self.signal)
+        # compute threshold
         if threshold is None:
-            threshold = np.quantile(np.abs(self.signal), quantile)
-            if not by_column:
-                print(f'threshold: {threshold}')
-        # by each columns
-        #######################################################################
-        if by_column:
-            mean = np.mean(np.abs(self.signal), axis=0)
-            std = np.std(np.abs(self.signal), axis=0)
-            threshold = mean + scipy.stats.norm.ppf(quantile) * std
-        signal_binary = (np.abs(self.signal) >= threshold).astype(np.uint8)
+            threshold = np.quantile(signal_abs, quantile)
+            logger.info(f'threshold: {threshold}')
+        signal_binary = (signal_abs >= threshold).astype(np.uint8)
         # return
-        #######################################################################
         if inplace:
             self.signal = signal_binary
+            logger.info('Signal updated with binary filter.')
+            return None
         else:
             return signal_binary
 
-    def gray_filter(self, inplace: bool = True) -> Optional[pd.DataFrame]:
+    def grayscale_transform(
+        self,
+        inplace: bool = True
+    ) -> Optional[pd.DataFrame]:
         """Transform data to grayscale 0 to 255 using min-max scalling.
 
         Args:
@@ -188,7 +183,7 @@ class DataFilter:
         else:
             return signal_gray
 
-    def gray_filter_cv2(
+    def grayscale_transform_cv2(
         self,
         inplace: bool = True
     ) -> Union[None, pd.DataFrame]:
@@ -214,46 +209,132 @@ class DataFilter:
         else:
             return signal_gray
 
-    def gauss_filter(
-        self,
-        s1: float = 85,
-        s2: float = 90,
-        std_space: float = 10,
-        cov_mat: np.ndarray = None,
-        inplace: bool = True
-    ) -> Union[None, pd.DataFrame]:
-        """Gaussian filter the data. There are 2 ways of input infomration of
-            the filter:
-            1. Input covariance matrix cov_mat
-            2. Input (s1, s2, std_space). From that, the program will infer the
-            covariance matrix. This is particular useful for straight line
-            shape alike application.
+    @staticmethod
+    def _inverse_pca(
+        eigenvalues: np.ndarray,
+        eigenvectors: np.ndarray
+    ) -> np.ndarray:
+        """Calculate covariance matrix from eigenvalues and eigenvectors.
+
+        This is a helper function for the Gaussian smoothing method.
 
         Args:
-            s1 (float, optional): Lower speed limit. Defaults to 85.
-            s2 (float, optional): Upper speed limit. Defaults to 90.
-            std_space (float, optional): Standard deviation along space axis.
-                Defaults to 10.
-            cov_mat (np.ndarray, optional):  The covariance matrix has the form
-                of [[a, b], [b, c]], in which a is the variance along the space
-                axis (not time!), c is the variance along the time axis, b is
-                the covariance between space and time. The unit of time is
-                second, the unit of space is channel. Defaults to None.
-            inplace (bool, optional): If overwrite attribute signal. Defaults
-                to True.
+            eigenvalues (np.ndarray): Eigenvalues
+            eigenvectors (np.ndarray): Eigenvectors
 
         Returns:
-            Union[None, pd.DataFrame]: pd.DataFrame if inplace=False.
-
+            np.ndarray: Covariance matrix
         """
-        # calculate covariance matrix if not inputted
-        #######################################################################
-        if cov_mat is None:
-            cov_mat = helper.cal_cov_mat(s1, s2, std_space)
-        gauss_filter = helper.create_gauss_filter(
-            cov_mat=cov_mat,
-            sampling_rate=self.sampling_rate
+        eigenvectors = np.matrix(eigenvectors)
+        eigenvalues = eigenvalues * np.identity(len(eigenvalues))
+        cov_mat = eigenvectors * eigenvalues * eigenvectors.T
+        cov_mat = np.asarray(cov_mat)
+        return cov_mat
+
+    @staticmethod
+    def _cal_cov_mat(s1: float, s2: float, std_space: float) -> np.matrix:
+        """Calculate covariance matrix from speed limits and space standard
+            deviation.
+
+        This is a helper function for the Gaussian smoothing method.
+
+        Args:
+            s1 (float): Low speed limit in km/h
+            s2 (float): High speed limit in km/h
+            std_space (float): Standard deviation along the spatial dimension.
+
+        Returns:
+            np.matrix: Covariance matrix
+        """
+        var_space = std_space ** 2
+        theta1 = np.arctan(3.6 / s1)
+        theta2 = np.arctan(3.6 / s2)
+        theta = 0.5 * (theta1 + theta2)
+        eigenvector_1 = [1, np.tan(theta)]
+        eigenvector_2 = [np.tan(theta), -1]
+        eigenvalue_1 = var_space / np.cos(theta)
+        eigenvalue_2 = np.tan(theta1 - theta) * eigenvalue_1
+        cov_mat = DataFilter.inverse_pca(
+            eigenvalues=[eigenvalue_1, eigenvalue_2],
+            eigenvectors=np.array([eigenvector_1, eigenvector_2]).T
         )
+        return cov_mat
+
+    @staticmethod
+    def _create_gaussian_kernel(
+        cov_mat: np.ndarray,
+        t_rate: int,
+        s_rate: int,
+    ) -> np.ndarray:
+        """
+        Create a Gaussian kernel from a covariance matrix.
+
+        Args:
+            cov_mat (np.ndarray): Covariance matrix (2x2 matrix).
+            t_rate (int, optional): Sampling rate for temporal dimension.
+            s_rate (int, optional): Sampling rate for spatial dimension.
+
+        Returns:
+            np.ndarray: Gaussian kernel.
+        """
+        # grid of points
+        size_t = np.sqrt(cov_mat[1][1]) * 2 * 2 * t_rate  # 2 std
+        size_s = np.sqrt(cov_mat[0][0]) * 2 * 2 * s_rate  # 2 std
+        size_t = int(round(size_t, 0))
+        size_s = int(round(size_s, 0))
+        range_t = np.arange(-size_t // 2, size_t // 2 + 1) / t_rate
+        range_s = np.arange(-size_s // 2, size_s // 2 + 1) / s_rate
+
+        # Create a meshgrid of x (spatial) and y (temporal) coordinates
+        x, y = np.meshgrid(range_s, range_t)
+
+        # Calculate the determinant and inverse of the covariance matrix
+        det_cov_mat = np.linalg.det(cov_mat)
+        inv_cov_mat = np.linalg.inv(cov_mat)
+
+        # Calculate the exponent of the Gaussian function
+        exponent = -0.5 * (
+            inv_cov_mat[0, 0] * x**2 +
+            2 * inv_cov_mat[0, 1] * x * y +
+            inv_cov_mat[1, 1] * y**2
+        )
+
+        # Compute the Gaussian filter
+        gaussian_kernel = np.exp(exponent) / (2 * np.pi * np.sqrt(det_cov_mat))
+
+        # Normalize the filter so that the sum of all elements is 1
+        gaussian_kernel /= np.sum(gaussian_kernel)
+
+        return gaussian_kernel
+
+    def gaussian_smooth(
+        self,
+        s1: float,
+        s2: float,
+        std_space: float,
+        inplace: bool = True
+    ) -> Optional[pd.DataFrame]:
+        """Apply a Gaussian smoothing filter to the signal.
+
+        Args:
+            s1 (float): Lower speed limit in km/h
+            s2 (float): Upper speed limit in km/h
+            std_space (float): Standard deviation along the space axis
+            inplace (bool, optional): If True, overwrite the signal attribute.
+                Defaults to True.
+
+        Returns:
+            Optional[pd.DataFrame]: Filtered signal as a DataFrame if
+                inplace=False.
+        """
+        # calculate covariance matrix
+        cov_mat = DataFilter._cal_cov_mat(s1, s2, std_space)
+        gauss_filter = DataFilter._create_gaussian_kernel(
+            cov_mat=cov_mat,
+            t_rate=self.t_rate,
+            s_rate=self.s_rate
+        )
+        # apply filter
         signal_tensor = torch.tensor(
             self.signal.values.copy(),
             dtype=torch.float32
@@ -279,21 +360,27 @@ class DataFilter:
             columns=self.signal.columns
         )
         # return
-        #######################################################################
         if inplace:
             self.signal = signal_gaussian
+            logger.info('Signal updated with Gaussian smooth.')
+            return None
         else:
             return signal_gaussian
 
-    def sobel_filter(self, inplace: bool = True) -> Union[None, pd.DataFrame]:
-        """Apply Sobel operator to detect edges.
+    def sobel_filter(self, inplace: bool = True) -> Optional[pd.DataFrame]:
+        """Apply Sobel operator to detect edges in the signal attribute.
+
+        The Sobel operator is used to detect gradients in the x and y
+        directions. The magnitude of the gradient is then calculated to
+        highlight edges.
 
         Args:
-            inplace (bool, optional): If overwrite attribute signal. Defaults
-                to True.
+            inplace (bool, optional): If True, modifies the signal attribute in
+                place. Otherwise, returns a new DataFrame. Defaults to True.
 
         Returns:
-            Union[None, pd.DataFrame]: pd.DataFrame if inplace=False.
+            Optional[pd.DataFrame]: Returns a DataFrame with Sobel filter
+                applied if inplace is False. Otherwise, returns None.
         """
         # Define the Sobel operator kernels
         sobel_kernel_x = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
@@ -315,10 +402,10 @@ class DataFilter:
             index=self.signal.index,
             columns=self.signal.columns
         )
-
         # return
-        #######################################################################
         if inplace:
             self.signal = signal_sobel
+            logger.info('Signal updated with Sobel filter.')
+            return None
         else:
             return signal_sobel

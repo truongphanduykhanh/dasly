@@ -2,6 +2,7 @@ import unittest
 from datetime import datetime
 from dasly.data_loader import Loader
 
+
 class TestDasly(unittest.TestCase):
 
     def setUp(self):
@@ -34,6 +35,7 @@ class TestDasly(unittest.TestCase):
         self.assertIsNotNone(self.dasly.sampling_rate)
         self.assertIsNotNone(self.dasly.duration)
         self.assertIsNotNone(self.dasly.file_paths)
+
 
 if __name__ == '__main__':
     unittest.main()
