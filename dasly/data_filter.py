@@ -4,15 +4,13 @@ __author__ = 'khanh.p.d.truong@ntnu.no'
 __date__ = '2024-06-01'
 
 import logging
-from typing import Optional, Union
+from typing import Literal, Optional, Union, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy.signal import butter, sosfilt
 from scipy.ndimage import convolve
 import cv2
-import torch
-import torch.nn.functional as F
 
 
 # Set up logger
@@ -125,7 +123,7 @@ class DataFilter:
         """Transform the signal attribute to a binary DataFrame.
 
         Takes the absolute value of the signal and maps it to 1 if it is
-        greater  than or equal to the threshold, otherwise maps to 0.
+        greater than or equal to the threshold, otherwise maps to 0.
 
         Args:
             quantile (float, optional): Quantile to compute threshold if no
@@ -210,162 +208,190 @@ class DataFilter:
             return signal_gray
 
     @staticmethod
-    def _inverse_pca(
-        eigenvalues: np.ndarray,
-        eigenvectors: np.ndarray
-    ) -> np.ndarray:
-        """Calculate covariance matrix from eigenvalues and eigenvectors.
-
-        This is a helper function for the Gaussian smoothing method.
-
-        Args:
-            eigenvalues (np.ndarray): Eigenvalues
-            eigenvectors (np.ndarray): Eigenvectors
-
-        Returns:
-            np.ndarray: Covariance matrix
-        """
-        eigenvectors = np.matrix(eigenvectors)
-        eigenvalues = eigenvalues * np.identity(len(eigenvalues))
-        cov_mat = eigenvectors * eigenvalues * eigenvectors.T
-        cov_mat = np.asarray(cov_mat)
-        return cov_mat
-
-    @staticmethod
-    def _cal_cov_mat(s1: float, s2: float, std_space: float) -> np.matrix:
-        """Calculate covariance matrix from speed limits and space standard
-            deviation.
-
-        This is a helper function for the Gaussian smoothing method.
+    def _cal_speed_angle(
+        s1: float,
+        s2: float,
+        unit: Literal['km/h', 'm/s'] = 'km/h'  # 'km/h' or 'm/s'
+    ) -> Tuple[float, float, float, float]:
+        """Calculate the angles of the speed limits and their average.
 
         Args:
-            s1 (float): Low speed limit in km/h
-            s2 (float): High speed limit in km/h
-            std_space (float): Standard deviation along the spatial dimension.
+            s1 (float): Speed of the first velocity vector.
+            s2 (float): Speed of the second velocity vector.
+            unit (Literal['km/h', 'm/s'], optional): Unit of the speed.
+                Defaults to 'km/h'.
 
         Returns:
-            np.matrix: Covariance matrix
+            Tuple[float, float, float]: Angles of the speed limits and the
+                average.
         """
-        var_space = std_space ** 2
-        theta1 = np.arctan(3.6 / s1)
-        theta2 = np.arctan(3.6 / s2)
+        # convert to m/s
+        if unit == 'km/h':
+            s1 = s1 / 3.6
+            s2 = s2 / 3.6
+        # calculate angle
+        theta1 = np.arctan(1 / s1)
+        theta2 = np.arctan(1 / s2)
         theta = 0.5 * (theta1 + theta2)
-        eigenvector_1 = [1, np.tan(theta)]
-        eigenvector_2 = [np.tan(theta), -1]
-        eigenvalue_1 = var_space / np.cos(theta)
-        eigenvalue_2 = np.tan(theta1 - theta) * eigenvalue_1
-        cov_mat = DataFilter.inverse_pca(
-            eigenvalues=[eigenvalue_1, eigenvalue_2],
-            eigenvectors=np.array([eigenvector_1, eigenvector_2]).T
-        )
+        return theta1, theta2, theta
+
+    @staticmethod
+    def _cal_cov_mat(
+        sigma11: float = None,
+        sigma22: float = None,
+        eigvec: Union[np.ndarray, list] = None,
+        eigval_prop: float = None
+    ) -> np.ndarray:
+        """Reconstruct the covariance matrix (of a 2D Gaussian distribution)
+            given one variance, the first eigenvector (upto a scalar multiple),
+            and the proportion of eigenvalues.
+
+        Args:
+            sigma11 (float, optional): Variance along the first axis (x-axis).
+                Defaults to None.
+            sigma22 (float, optional): Variance along the second axis (y-axis).
+                Defaults to None.
+            eigvec (Union[np.ndarray, list], optional): First eigenvector v1.
+                Defaults to None.
+            eigval_prop (float, optional): Proportion of the two eigenvalues
+                (lambda1 / lambda2). Defaults to None.
+
+        Returns:
+            np.ndarray: The reconstructed covariance matrix.
+        """
+        if (sigma11 is None) + (sigma22 is None) != 1:
+            raise ValueError('Either sigma11 or sigma22 must be provided.')
+        if sigma11:
+            denominator = eigval_prop * (eigvec[0] ** 2) + (eigvec[1] ** 2)
+            sigma12 = eigvec[0] * eigvec[1] * (eigval_prop - 1)
+            sigma12 = sigma11 * sigma12 / denominator
+            sigma22 = eigval_prop * (eigvec[1] ** 2) + (eigvec[0] ** 2)
+            sigma22 = sigma11 * sigma22 / denominator
+        else:
+            denominator = eigval_prop * (eigvec[1] ** 2) + (eigvec[0] ** 2)
+            sigma12 = eigvec[0] * eigvec[1] * (eigval_prop - 1)
+            sigma12 = sigma22 * sigma12 / denominator
+            sigma11 = eigval_prop * (eigvec[0] ** 2) + (eigvec[1] ** 2)
+            sigma11 = sigma22 * sigma11 / denominator
+        cov_mat = np.array([[sigma11, sigma12], [sigma12, sigma22]])
         return cov_mat
 
     @staticmethod
-    def _create_gaussian_kernel(
+    def _create_gauss_kernel(
         cov_mat: np.ndarray,
-        t_rate: int,
-        s_rate: int,
-    ) -> np.ndarray:
-        """
-        Create a Gaussian kernel from a covariance matrix.
+        s_rate: float,
+        t_rate: float,
+        std_multi: float = 2
+    ):
+        """Create a 2D Gaussian kernel from the covariance matrix.
 
         Args:
-            cov_mat (np.ndarray): Covariance matrix (2x2 matrix).
-            t_rate (int, optional): Sampling rate for temporal dimension.
-            s_rate (int, optional): Sampling rate for spatial dimension.
+            cov_mat (np.ndarray): Covariance matrix.
+            s_rate (float): Spatial sampling rate.
+            t_rate (float): Temporal sampling rate.
+            std_multi (float, optional): Number of standard deviation to cover.
+                Defaults to 2.
 
         Returns:
             np.ndarray: Gaussian kernel.
         """
-        # grid of points
-        size_t = np.sqrt(cov_mat[1][1]) * 2 * 2 * t_rate  # 2 std
-        size_s = np.sqrt(cov_mat[0][0]) * 2 * 2 * s_rate  # 2 std
-        size_t = int(round(size_t, 0))
-        size_s = int(round(size_s, 0))
-        range_t = np.arange(-size_t // 2, size_t // 2 + 1) / t_rate
-        range_s = np.arange(-size_s // 2, size_s // 2 + 1) / s_rate
+        # Adjust the covariance matrix to the actual sampling rates
+        cov_mat_adj = cov_mat.copy()
+        cov_mat_adj[0, 0] *= s_rate ** 2
+        cov_mat_adj[1, 1] *= t_rate ** 2
+        cov_mat_adj[0, 1] *= s_rate * t_rate
+        cov_mat_adj[1, 0] = cov_mat_adj[0, 1]
 
-        # Create a meshgrid of x (spatial) and y (temporal) coordinates
+        # Get the standard deviations
+        sigma_s = np.sqrt(cov_mat_adj[0, 0])
+        sigma_t = np.sqrt(cov_mat_adj[1, 1])
+
+        # Define the size of the kernel to cover 2 std each side
+        kernel_size_s = int(np.ceil(sigma_s * std_multi))
+        kernel_size_t = int(np.ceil(sigma_t * std_multi))
+
+        # Create a grid of (x, y) coordinates
+        range_s = np.arange(-kernel_size_s, kernel_size_s + 1)
+        range_t = np.arange(-kernel_size_t, kernel_size_t + 1)
         x, y = np.meshgrid(range_s, range_t)
 
-        # Calculate the determinant and inverse of the covariance matrix
-        det_cov_mat = np.linalg.det(cov_mat)
-        inv_cov_mat = np.linalg.inv(cov_mat)
-
-        # Calculate the exponent of the Gaussian function
+        # Calculate the Gaussian values
+        det_cov_mat = np.linalg.det(cov_mat_adj)  # determinant of cov. matrix
+        inv_cov_mat = np.linalg.inv(cov_mat_adj)  # inverse covariance matrix
         exponent = -0.5 * (
             inv_cov_mat[0, 0] * x**2 +
             2 * inv_cov_mat[0, 1] * x * y +
             inv_cov_mat[1, 1] * y**2
         )
+        gauss_kernel = np.exp(exponent) / (2 * np.pi * np.sqrt(det_cov_mat))
+        # Normalize the filter
+        gauss_kernel /= np.sum(gauss_kernel)
 
-        # Compute the Gaussian filter
-        gaussian_kernel = np.exp(exponent) / (2 * np.pi * np.sqrt(det_cov_mat))
-
-        # Normalize the filter so that the sum of all elements is 1
-        gaussian_kernel /= np.sum(gaussian_kernel)
-
-        return gaussian_kernel
+        return gauss_kernel
 
     def gaussian_smooth(
         self,
         s1: float,
         s2: float,
-        std_space: float,
+        std_s: float = None,
+        std_t: float = None,
+        unit: Literal['km/h', 'm/s'] = 'km/h',  # 'km/h' or 'm/s'
         inplace: bool = True
     ) -> Optional[pd.DataFrame]:
         """Apply a Gaussian smoothing filter to the signal.
 
         Args:
-            s1 (float): Lower speed limit in km/h
-            s2 (float): Upper speed limit in km/h
-            std_space (float): Standard deviation along the space axis
+            s1 (float): Lower speed limit.
+            s2 (float): Upper speed limit.
+            std_s (float, optional): Standard deviation along the space
+                dimension. In meters. Defaults to None.
+            std_t (float, optional): Standard deviation along the time
+                dimension. In seconds. Defaults to None.
             inplace (bool, optional): If True, overwrite the signal attribute.
                 Defaults to True.
+            unit (Literal['km/h', 'm/s'], optional): Unit of the speed.
+                Defaults to 'km/h'.
 
         Returns:
             Optional[pd.DataFrame]: Filtered signal as a DataFrame if
                 inplace=False.
         """
+        # calculate speed angles
+        theta1, _theta2, theta = DataFilter._cal_speed_angle(s1, s2, unit)
+
         # calculate covariance matrix
-        cov_mat = DataFilter._cal_cov_mat(s1, s2, std_space)
-        gauss_filter = DataFilter._create_gaussian_kernel(
+        cov_mat = DataFilter._cal_cov_mat(
+            sigma11=std_s ** 2 if std_s else None,  # variance in space
+            sigma22=std_t ** 2 if std_t else None,  # variance in time
+            eigvec=[1, np.tan(theta)],
+            eigval_prop=1 / np.tan(theta1 - theta)
+        )
+        gauss_kernel = DataFilter._create_gauss_kernel(
             cov_mat=cov_mat,
-            t_rate=self.t_rate,
-            s_rate=self.s_rate
+            s_rate=self.s_rate,
+            t_rate=self.t_rate
         )
-        # apply filter
-        signal_tensor = torch.tensor(
-            self.signal.values.copy(),
-            dtype=torch.float32
-        )
-        filter_tensor = torch.tensor(
-            gauss_filter,
-            dtype=torch.float32
-        )
-        pad_t = np.floor(filter_tensor.shape[0] / 2).astype(int)
-        pad_s = np.floor(filter_tensor.shape[1] / 2).astype(int)
-        signal_gaussian = F.conv2d(
-            signal_tensor.unsqueeze(0).unsqueeze(0),
-            filter_tensor.unsqueeze(0).unsqueeze(0),
-            padding=(pad_t, pad_s)
-        )
-        signal_gaussian = signal_gaussian[
-            :, :, 0: self.signal.shape[0], 0: self.signal.shape[1]]
-        signal_gaussian = signal_gaussian.squeeze(0).squeeze(0)
-        signal_gaussian = signal_gaussian.detach().cpu().numpy()
-        signal_gaussian = pd.DataFrame(
-            signal_gaussian,
+        self.gauss_kernel = gauss_kernel
+
+        # cv2 filter (correlation). correlation does not flip the kernel.
+        # convolution flips the kernel, which is not desired for image blurring
+        # so when the kernel is not symmetric, correlation is preferred
+        # when the kernel is symmetric, correlation and convolution will have
+        # same result (even though correlation is more ideally correct)
+        signal_gauss = cv2.filter2D(self.signal, -1, gauss_kernel)
+        signal_gauss = pd.DataFrame(
+            signal_gauss,
             index=self.signal.index,
             columns=self.signal.columns
         )
         # return
+        #######################################################################
         if inplace:
-            self.signal = signal_gaussian
-            logger.info('Signal updated with Gaussian smooth.')
+            self.signal = signal_gauss
+            logger.info('Signal updated with Gaussian smoothing.')
             return None
         else:
-            return signal_gaussian
+            return signal_gauss
 
     def sobel_filter(self, inplace: bool = True) -> Optional[pd.DataFrame]:
         """Apply Sobel operator to detect edges in the signal attribute.
