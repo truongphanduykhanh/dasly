@@ -6,7 +6,7 @@ __date__ = '2024-06-01'
 import logging
 import logging.config
 from typing import Union
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 
 import numpy as np
 import pandas as pd
@@ -119,14 +119,19 @@ class DataLoader:
     def _update_t_rate(self) -> None:
         """Update temporal sampling rate of the data.
         """
-        time_0 = self.signal.index[0]
-        time_1 = self.signal.index[1]
-        # Create datetime objects with a common date
-        common_date = datetime.today()
-        datetime0 = datetime.combine(common_date, time_0)
-        datetime1 = datetime.combine(common_date, time_1)
-        # Calculate the time difference
-        time_diff = datetime1 - datetime0
+        time0 = self.signal.index[0]
+        time1 = self.signal.index[1]
+        if isinstance(time0, pd.Timestamp) and isinstance(time1, pd.Timestamp):
+            # If both are pandas timestamps, just calculate the difference
+            time_diff = time1 - time0
+        elif isinstance(time0, time) and isinstance(time1, time):
+            # If both are datetime.time objects,
+            # convert them to datetime.datetime
+            common_date = datetime.today()
+            datetime0 = datetime.combine(common_date, time0)
+            datetime1 = datetime.combine(common_date, time1)
+            time_diff = datetime1 - datetime0
+        # Calculate the time difference in seconds
         time_diff = time_diff.total_seconds()
         time_diff = np.abs(time_diff)
         t_rate = 1 / time_diff

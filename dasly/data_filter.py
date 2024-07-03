@@ -371,18 +371,28 @@ class DataFilter:
             s_rate=self.s_rate,
             t_rate=self.t_rate
         )
-        self.gauss_kernel = gauss_kernel
 
         # cv2 filter (correlation). correlation does not flip the kernel.
         # convolution flips the kernel, which is not desired for image blurring
         # so when the kernel is not symmetric, correlation is preferred
         # when the kernel is symmetric, correlation and convolution will have
         # same result (even though correlation is more ideally correct)
-        signal_gauss = cv2.filter2D(self.signal, -1, gauss_kernel)
+        signal_gauss = cv2.filter2D(
+            np.asarray(self.signal), -1, np.asarray(gauss_kernel)
+        )
         signal_gauss = pd.DataFrame(
             signal_gauss,
             index=self.signal.index,
             columns=self.signal.columns
+        )
+
+        # Create a DataFrame for the Gaussian kernel for saving as an attribute
+        idx = [i * 1/self.t_rate for i in range(gauss_kernel.shape[0])]
+        col = [i * 1/self.s_rate for i in range(gauss_kernel.shape[1])]
+        self.gauss_kernel = pd.DataFrame(
+            gauss_kernel,
+            index=idx,
+            columns=col
         )
         # return
         #######################################################################
