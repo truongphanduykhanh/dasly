@@ -24,10 +24,7 @@ class DataPlotter:
 
     def __init__(self):
         self.signal: pd.DataFrame = None
-        self.t_rate: int = None
-        self.s_rate: int = None
         self.lines: pd.DataFrame = None
-        self.kernel: np.ndarray = None
 
     def check_data_type(
         self,
@@ -60,7 +57,9 @@ class DataPlotter:
         data: Union[pd.DataFrame, np.ndarray] = None,
         vmin: float = None,
         vmax: float = None,
-        aspect: float = None
+        aspect: float = None,
+        xlabel: str = 'Channel',
+        ylabel: str = 'Time'
     ) -> None:
         """Plot heatmap.
 
@@ -71,6 +70,8 @@ class DataPlotter:
                 If None, automatically choose suitable value. Defaults to None.
             vmax (Union[float, str], optional): Values to anchor the colormap.
                 If None, automatically choose suitable value. Defaults to None.
+            xlabel (str, optional): Label for x-axis. Defaults to 'Channel'.
+            ylabel (str, optional): Label for y-axis. Defaults to 'Time'.
         """
         # Data input
         #######################################################################
@@ -146,8 +147,8 @@ class DataPlotter:
 
         # Axis labels
         #######################################################################
-        plt.xlabel('Channel')
-        plt.ylabel('Time')
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
 
         # Add colorbar
         #######################################################################
