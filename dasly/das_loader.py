@@ -1,4 +1,4 @@
-"""Provides convenient process to load DAS data."""
+"""Provides convenient methods to load DAS data."""
 
 __author__ = 'khanh.p.d.truong@ntnu.no'
 __date__ = '2024-06-01'
@@ -102,9 +102,10 @@ def get_file_paths(
     return file_paths
 
 
-class DataLoader:
+class DasLoader:
+    """Load DAS data."""
 
-    def __init__(self, ch_space: float = 1) -> None:
+    def __init__(self) -> None:
         """Initialize instance.
         """
         # list of attributes
@@ -114,7 +115,6 @@ class DataLoader:
         self.t_rate: int = None  # temporal sampling rate, in sample per second
         self.s_rate: int = None  # spatial sampling rate, in sample per meter
         self.duration: int = None  # duration of the data, in seconds
-        self.ch_space = ch_space  # distance between two channels, in meters
 
     def _update_t_rate(self) -> None:
         """Update temporal sampling rate of the data.
@@ -142,7 +142,6 @@ class DataLoader:
         """
         # Calculate the distance between two consecutive samples
         distance = self.signal.columns[1] - self.signal.columns[0]
-        distance = np.abs(distance) * self.ch_space
         self.s_rate = 1 / distance
 
     def _update_duration(self) -> None:
@@ -151,7 +150,7 @@ class DataLoader:
         self.duration = len(self.signal) * (1 / self.t_rate)
 
     def reset(self) -> None:
-        """Reset all attributes and transformations on signal.
+        """Reset the defalt attribute signal to the raw signal.
         """
         self.signal = self.signal_raw.copy()
         self._update_t_rate()

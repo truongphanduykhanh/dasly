@@ -19,12 +19,16 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
 
-class DataPlotter:
+class DasPlotter:
     """Visualize DAS data."""
 
-    def __init__(self):
-        self.signal: pd.DataFrame = None
-        self.lines: pd.DataFrame = None
+    def __init__(
+        self,
+        signal: pd.DataFrame = None,
+        lines: pd.DataFrame = None
+    ):
+        self.signal = signal
+        self.lines = lines
 
     def check_data_type(
         self,
@@ -58,7 +62,7 @@ class DataPlotter:
         vmin: float = None,
         vmax: float = None,
         aspect: float = None,
-        xlabel: str = 'Channel',
+        xlabel: str = 'Space',
         ylabel: str = 'Time'
     ) -> None:
         """Plot heatmap.
@@ -70,7 +74,7 @@ class DataPlotter:
                 If None, automatically choose suitable value. Defaults to None.
             vmax (Union[float, str], optional): Values to anchor the colormap.
                 If None, automatically choose suitable value. Defaults to None.
-            xlabel (str, optional): Label for x-axis. Defaults to 'Channel'.
+            xlabel (str, optional): Label for x-axis. Defaults to 'Space'.
             ylabel (str, optional): Label for y-axis. Defaults to 'Time'.
         """
         # Data input
@@ -84,8 +88,8 @@ class DataPlotter:
         # 50*(10**6) cells takes about 1 second to plot
         relative_data_size = data.count().sum() / (50*(10**6))
         if relative_data_size > 10:
-            logger.info('Expect to display in {relative_data_size:.0f}',
-                        ' seconds. Consider to sample the data.')
+            logger.info("""Expect to display in {relative_data_size:.0f}
+                        seconds. Consider to sample the data.""")
 
         # Define cmap and norm based on data type
         #######################################################################

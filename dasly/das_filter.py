@@ -1,4 +1,4 @@
-"""Provides convenient process to filter DAS data."""
+"""Provides convenient methods to filter DAS data."""
 
 __author__ = 'khanh.p.d.truong@ntnu.no'
 __date__ = '2024-06-01'
@@ -12,19 +12,23 @@ from scipy.signal import butter, sosfilt
 from scipy.ndimage import convolve
 import cv2
 
-
 # Set up logger
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
 
-class DataFilter:
+class DasFilter:
     """Filter DAS data."""
 
-    def __init__(self):
-        self.signal: pd.DataFrame = None
-        self.t_rate: float = None
-        self.s_rate: float = None
+    def __init__(
+        self,
+        signal: pd.DataFrame = None,
+        t_rate: float = None,
+        s_rate: float = None
+    ):
+        self.signal = signal
+        self.t_rate = t_rate
+        self.s_rate = s_rate
 
     def bandpass_filter(
         self,
@@ -357,16 +361,16 @@ class DataFilter:
                 inplace=False.
         """
         # calculate speed angles
-        theta1, _theta2, theta = DataFilter._cal_speed_angle(s1, s2, unit)
+        theta1, _theta2, theta = DasFilter._cal_speed_angle(s1, s2, unit)
 
         # calculate covariance matrix
-        cov_mat = DataFilter._cal_cov_mat(
+        cov_mat = DasFilter._cal_cov_mat(
             sigma11=std_s ** 2 if std_s else None,  # variance in space
             sigma22=std_t ** 2 if std_t else None,  # variance in time
             eigvec=[1, np.tan(theta)],
             eigval_prop=1 / np.tan(theta1 - theta)
         )
-        gauss_kernel = DataFilter._create_gauss_kernel(
+        gauss_kernel = DasFilter._create_gauss_kernel(
             cov_mat=cov_mat,
             s_rate=self.s_rate,
             t_rate=self.t_rate

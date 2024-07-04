@@ -17,7 +17,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from sklearn.cluster import DBSCAN
 
-from dasly import dasly
+from dasly import dasly_old
 
 
 # Parameters from the YAML file
@@ -88,7 +88,7 @@ def run_dasly(input_dir: str, output_dir: str, batch: int, first_file_dt: str):
     output directory
     """
     detect_lines = pd.DataFrame()  # create an empty data frame
-    das = dasly.Dasly()
+    das = dasly_old.Dasly()
     das.load_data(
         folder_path=input_dir,
         start=first_file_dt,  # start time YYYYMMDD HHMMSS
