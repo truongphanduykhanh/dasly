@@ -1,14 +1,14 @@
-from dasly.das_loader import DasLoader
-from dasly.das_filter import DasFilter
-from dasly.das_plotter import DasPlotter
-from dasly.das_sampler import DasSampler
-from dasly.das_analyzer import DasAnalyzer
+from dasly.das_loader import DASLoader
+from dasly.das_filter import DASFilter
+from dasly.das_plotter import DASPlotter
+from dasly.das_sampler import DASSampler
+from dasly.das_analyzer import DASAnalyzer
 
 
-class Dasly(DasLoader, DasFilter, DasPlotter, DasSampler, DasAnalyzer):
-    def __init__(self, *args, **kwargs):
-        DasLoader.__init__(self, *args, **kwargs)
-        DasFilter.__init__(self)
-        DasPlotter.__init__(self)
-        DasSampler.__init__(self)
-        DasAnalyzer.__init__(self)
+class Dasly(DASLoader, DASFilter, DASPlotter, DASSampler, DASAnalyzer):
+    def __init__(self):
+        DASLoader.__init__(self)
+        DASFilter.__init__(self)
+        DASPlotter.__init__(self)
+        DASSampler.__init__(self)
+        DASAnalyzer.__init__(self)

@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
 
-class DasPlotter:
+class DASPlotter:
     """Visualize DAS data."""
 
     def __init__(
@@ -88,8 +88,8 @@ class DasPlotter:
         # 50*(10**6) cells takes about 1 second to plot
         relative_data_size = data.count().sum() / (50*(10**6))
         if relative_data_size > 10:
-            logger.info("""Expect to display in {relative_data_size:.0f}
-                        seconds. Consider to sample the data.""")
+            logger.info(f'Expect to display in {relative_data_size:.0f} '
+                        + 'seconds. Consider to sample the data.')
 
         # Define cmap and norm based on data type
         #######################################################################
@@ -173,6 +173,6 @@ class DasPlotter:
         # Add Hough transform lines if available
         #######################################################################
         if self.lines is not None:
-            for line in self.lines.iloc[:, 0:4].values:  # loop over the lines
+            for line in np.squeeze(self.lines):  # loop over the lines
                 x1, y1, x2, y2 = line
                 plt.plot([x1, x2], [y1, y2])

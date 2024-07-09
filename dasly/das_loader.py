@@ -48,8 +48,8 @@ def infer_time(
     """
     # Check if two and only two out of three are inputted
     if (start is None) + (duration is None) + (end is None) != 1:
-        raise ValueError("The function accepts two and only two out of "
-                         "three (start, end, duration)")
+        raise ValueError('The function accepts two and only two out of '
+                         + 'three (start, end, duration)')
     # Convert string to datetime
     if isinstance(start, str):
         start = datetime.strptime(start, fmt)
@@ -102,7 +102,7 @@ def get_file_paths(
     return file_paths
 
 
-class DasLoader:
+class DASLoader:
     """Load DAS data."""
 
     def __init__(self) -> None:
@@ -125,7 +125,7 @@ class DasLoader:
             # If both are pandas timestamps, just calculate the difference
             time_diff = time1 - time0
         elif isinstance(time0, time) and isinstance(time1, time):
-            # If both are datetime.time objects,
+            # If both are datetime.time objects (only time, not date),
             # convert them to datetime.datetime
             common_date = datetime.today()
             datetime0 = datetime.combine(common_date, time0)

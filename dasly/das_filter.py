@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
 
-class DasFilter:
+class DASFilter:
     """Filter DAS data."""
 
     def __init__(
@@ -51,10 +51,8 @@ class DasFilter:
                 inplace=False.
         """
         if not (0 < low < high < 0.5 * self.t_rate):
-            error_msg = """Invalid frequency bounds.
-            Ensure 0 < low < high < nyquist."""
-            logger.error(error_msg)
-            raise ValueError(error_msg)
+            raise ValueError('Invalid frequency bounds. Ensure 0 < low < high '
+                             + '< nyquist.')
         nyquist = 0.5 * self.t_rate
         normalized_low = low / nyquist
         normalized_high = high / nyquist
@@ -97,10 +95,8 @@ class DasFilter:
                 inplace=False.
         """
         if not (0 < cutoff < 0.5 * self.t_rate):
-            error_msg = """Invalid cutoff frequency.
-            Ensure 0 < cutoff < nyquist."""
-            logger.error(error_msg)
-            raise ValueError(error_msg)
+            raise ValueError('Invalid cutoff frequency. Ensure 0 < cutoff < '
+                             + 'nyquist.')
         nyquist = 0.5 * self.t_rate
         normalized_cutoff = cutoff / nyquist
         sos = butter(order, normalized_cutoff, btype='low', output='sos')
@@ -146,12 +142,12 @@ class DasFilter:
         # compute threshold
         if threshold is None:
             threshold = np.quantile(signal_abs, quantile)
-            logger.info(f'threshold: {threshold}')
         signal_binary = (signal_abs >= threshold).astype(np.uint8)
         # return
         if inplace:
             self.signal = signal_binary
-            logger.info('Signal updated with binary filter.')
+            logger.info('Signal updated with binary transform with threshold '
+                        + f'{threshold:.3g}.')
             return None
         else:
             return signal_binary
@@ -361,16 +357,16 @@ class DasFilter:
                 inplace=False.
         """
         # calculate speed angles
-        theta1, _theta2, theta = DasFilter._cal_speed_angle(s1, s2, unit)
+        theta1, _theta2, theta = DASFilter._cal_speed_angle(s1, s2, unit)
 
         # calculate covariance matrix
-        cov_mat = DasFilter._cal_cov_mat(
+        cov_mat = DASFilter._cal_cov_mat(
             sigma11=std_s ** 2 if std_s else None,  # variance in space
             sigma22=std_t ** 2 if std_t else None,  # variance in time
             eigvec=[1, np.tan(theta)],
             eigval_prop=1 / np.tan(theta1 - theta)
         )
-        gauss_kernel = DasFilter._create_gauss_kernel(
+        gauss_kernel = DASFilter._create_gauss_kernel(
             cov_mat=cov_mat,
             s_rate=self.s_rate,
             t_rate=self.t_rate

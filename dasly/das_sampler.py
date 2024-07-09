@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
 
-class DasSampler:
+class DASSampler:
 
     def __init__(self):
         self.signal: pd.DataFrame = None
