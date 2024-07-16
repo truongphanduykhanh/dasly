@@ -114,6 +114,44 @@ class DASFilter:
         else:
             return signal_lowpass
 
+    def highpass_filter(
+        self,
+        cutoff: float,
+        order: int = 4,
+        inplace: bool = True
+    ) -> Optional[pd.DataFrame]:
+        """Apply a high-pass filter to the signal.
+
+        Args:
+            cutoff (float): Cut-off frequency.
+            order (int, optional): Order of IIR filter. Defaults to 4.
+            inplace (bool, optional): If True, overwrite the signal attribute.
+                Defaults to True.
+
+        Returns:
+            Optional[pd.DataFrame]: Filtered signal as a DataFrame if
+                inplace=False.
+        """
+        if not (0 < cutoff < 0.5 * self.t_rate):
+            raise ValueError('Invalid cutoff frequency. Ensure 0 < cutoff < '
+                             + 'nyquist.')
+        nyquist = 0.5 * self.t_rate
+        normalized_cutoff = cutoff / nyquist
+        sos = butter(order, normalized_cutoff, btype='high', output='sos')
+        signal_highpass = sosfilt(sos, self.signal, axis=0)
+        signal_highpass = pd.DataFrame(
+            signal_highpass,
+            index=self.signal.index,
+            columns=self.signal.columns
+        )
+        # return
+        if inplace:
+            self.signal = signal_highpass
+            logger.info('Signal updated with high-pass filter.')
+            return None
+        else:
+            return signal_highpass
+
     def binary_transform(
         self,
         quantile: float = None,

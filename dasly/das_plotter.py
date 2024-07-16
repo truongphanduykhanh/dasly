@@ -63,7 +63,9 @@ class DASPlotter:
         vmax: float = None,
         aspect: float = None,
         xlabel: str = 'Space',
-        ylabel: str = 'Time'
+        ylabel: str = 'Time',
+        xticks_rotate: float = 0,
+        yticks_rotate: float = 0
     ) -> None:
         """Plot heatmap.
 
@@ -76,6 +78,10 @@ class DASPlotter:
                 If None, automatically choose suitable value. Defaults to None.
             xlabel (str, optional): Label for x-axis. Defaults to 'Space'.
             ylabel (str, optional): Label for y-axis. Defaults to 'Time'.
+            xticks_rotate (float, optional): Rotation of x-axis labels.
+                Defaults to 0.
+            yticks_rotate (float, optional): Rotation of y-axis labels.
+                Defaults to 0.
         """
         # Data input
         #######################################################################
@@ -149,6 +155,9 @@ class DASPlotter:
         plt.gca().set_yticks(current_yticks)
         plt.gca().set_yticklabels(new_yticks)
 
+        plt.xticks(rotation=xticks_rotate)  # Rotate x-axis labels
+        plt.yticks(rotation=yticks_rotate)  # Rotate y-axis labels
+
         # Axis labels
         #######################################################################
         plt.xlabel(xlabel)
@@ -173,6 +182,6 @@ class DASPlotter:
         # Add Hough transform lines if available
         #######################################################################
         if self.lines is not None:
-            for line in np.squeeze(self.lines):  # loop over the lines
+            for line in self.lines:  # loop over the lines
                 x1, y1, x2, y2 = line
                 plt.plot([x1, x2], [y1, y2])

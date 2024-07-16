@@ -1,21 +1,34 @@
 input_dir: /mnt/Datastore/usr/kptruong/dasly/test/test_aastfjordbrua_input
-output_dir: /mnt/Datastore/usr/kptruong/dasly/test/test_aastfjordbrua_output
+# input_dir should contain the following structure: /YYYYMMDD/dphi/HHMMSS.hdf5
+
+database:
+  database_type: postgresql
+  dbapi: psycopg2
+  endpoint: 129.241.154.236
+  port: 5432
+  database: aastfjordbrua
+  table: vehicles
+
 batch_hdf5: 10  # length of each hdf5 file, in seconds (this is fixed)
+
 dasly:
   batch: 60  # length of each batch, in seconds
   batch_gap: 10  # gap between the batch, in seconds, multiple of batch_hdf5
-  low_speed_limit: 40  # speed limit, in km/h
-  high_speed_limit: 130  # speed limit, in km/h
 
-low_pass_freq: 0.5
+lowpass_filter_freq: 0.5
 
-decimate:
-  sampling_rate: 6
+decimate_t_rate: 6
 
-gauss_filter:
+gaussian_smooth:
   s1: 80
   s2: 85
-  std: 10
+  std_s: 10
 
 binary_threshold: 2.5e-8
-dbscan_eps: 1
+
+hough_transform:
+  speed_res: 0.5
+  length_meters: 600
+
+
+dbscan_eps_seconds: 1  

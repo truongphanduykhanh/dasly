@@ -44,7 +44,7 @@ def infer_time(
             (start, duration, end)
 
     Returns:
-        tuple[datetime, int, datetime]: start, end, duration
+        tuple[datetime, int, datetime]: start, duration, end
     """
     # Check if two and only two out of three are inputted
     if (start is None) + (duration is None) + (end is None) != 1:
@@ -164,7 +164,10 @@ class DASLoader:
         start: Union[str, datetime] = None,
         duration: int = None,
         end: Union[str, datetime] = None,
-        fmt: str = '%Y%m%d %H%M%S'
+        fmt: str = '%Y%m%d %H%M%S',
+        suppress_date: bool = False,
+        chIndex: np.ndarray = None,
+        integrate: bool = True,
     ) -> None:
         """Load data to the instance.
 
@@ -183,6 +186,13 @@ class DASLoader:
                 Defaults to None.
             format (str, optional): Format of start, end. Defaults to
                 '%Y%m%d %H%M%S'.
+            suppress_date (bool, optional): If True, keep only time as index if
+                all the data come from the same date. Defaults to False.
+            chIndex (np.ndarray, optional): Channel index. See more at
+                simpleDASreader. Defaults to None.
+            integrate (bool, optional): If True, integrate the data to get
+                strain unit. Otherwise, the data is in strain rate unit. See
+                more at simpleDASreader. Defaults to True
         """
         slicing = False  # not slicing the data later if file_paths is given
         if not file_paths:
@@ -203,11 +213,11 @@ class DASLoader:
         # Load data
         signal = simpleDASreader.load_DAS_files(
             filepaths=file_paths,
-            chIndex=None,  # default
+            chIndex=chIndex,
             samples=None,  # default
             sensitivitySelect=0,  # default
-            integrate=False,  # change to False
-            unwr=True,  # change to True
+            integrate=integrate,
+            unwr=False,  # default
             spikeThr=None,  # default
             userSensitivity=None  # default
         )
@@ -220,7 +230,7 @@ class DASLoader:
         self.end = np.max(signal.index)
         # if the data is within one day, just keep the time as index
         # because keeping date makes the index unnecessarily long
-        if pd.Series(signal.index).dt.date.nunique() == 1:
+        if suppress_date and pd.Series(signal.index).dt.date.nunique() == 1:
             signal.index = pd.to_datetime(signal.index).time
         self.signal_raw = signal  # immutable attribute
         self.signal = self.signal_raw.copy()  # mutable attribute

@@ -106,6 +106,165 @@ class DASAnalyzer:
         )
         return length
 
+    @staticmethod
+    def lines_intersect_edges(
+        lines: np.ndarray,
+        width: int,
+        height: int
+    ) -> np.ndarray:
+        """"Calculate intersections of lines (in pixel) with all edges
+        boundaries of the image, and intersections with extended y-axis (to
+        calculate the time of the signal to reach the edge).
+        """
+        width = width - 1  # zero-based index
+        height = height - 1  # zero-based index
+
+        x1 = lines[:, 0]
+        y1 = lines[:, 1]
+        x2 = lines[:, 2]
+        y2 = lines[:, 3]
+
+        # Suppress divide by zero warning, multiply inf and nan values by 0
+        with np.errstate(divide='ignore', invalid='ignore'):
+            # Formular of a straight line: y = mx + b
+            # np.array([0, 0, 1, -1]) /  np.array([1, -1, 0, 0])
+            # -> [0, -0, inf, -inf]
+            m = (y2 - y1) / (x2 - x1)
+            # np.array([0, 0, 0]) *  np.array([np.nan, np.inf, -np.inf]) ->
+            # [nan, nan, nan]
+            # np.array([1, 1, 1]) *  np.array([np.nan, np.inf, -np.inf]) ->
+            # [ nan,  inf, -inf]
+            # np.array([-1, -1, -1]) * v np.array([np.nan, np.inf, -np.inf]) ->
+            # [ nan, -inf,  inf]
+            b = y1 - m * x1
+
+            # Calculate the intersection of the lines with the (extended) edges
+            y0 = m * 0 + b  # when x = 0
+            y_width = m * width + b  # when x = width
+            x0 = (0 - b) / m  # when y = 0
+            x_height = (height - b) / m  # when y = height
+
+        # Clipping values to image boundaries if the intersection is outside
+        # and different from infinity. Clip NA will remain NA.
+        y0_edge = np.where(np.isinf(y0), y0, np.clip(y0, 0, height))
+        y_width_edge = np.where(
+            np.isinf(y_width), y_width, np.clip(y_width, 0, height))
+        x0_edge = np.where(np.isinf(x0), x0, np.clip(x0, 0, width))
+        x_height_edge = np.where(
+            np.isinf(x_height), x_height, np.clip(x_height, 0, width))
+
+        # Create boolean masks
+        mask_ge_0 = m >= 0
+        mask_lt_0 = m < 0
+
+        # Initialize the result array [x1, y1, x2, y2], where (x1, y1) is the
+        # intersection with the lower edges; (x2, y2) is the intersection with
+        # the upper edges,
+
+        intersect_edges = np.zeros((len(m), 4))
+
+        # Fill the result array based on the conditions
+        intersect_edges[mask_ge_0] = np.stack((
+            x0_edge[mask_ge_0],  # always fixed because y=0
+            y0_edge[mask_ge_0],  # when m>=0, it will intersect left edge first
+            x_height_edge[mask_ge_0],  # always fixed because y=height
+            y_width_edge[mask_ge_0],
+        ), axis=1)
+        intersect_edges[mask_lt_0] = np.stack((
+            x0_edge[mask_lt_0],  # always fixed because y=0
+            y_width_edge[mask_lt_0],  # m<0, it intersects the right edge first
+            x_height_edge[mask_lt_0],  # always fixed because y=height
+            y0_edge[mask_lt_0]
+        ), axis=1)
+
+        intersect_edges_ext = np.stack((
+            y0,  # intersection with the extended left edge
+            y_width  # intersection with the extended right edge
+        ), axis=1)
+
+        intersect = np.hstack([intersect_edges, intersect_edges_ext])
+
+        return intersect
+
+    def _lines_df(self):
+        """Create a DataFrame of lines, convert the pixel intersections to
+        space and time convinient information.
+        """
+        intersect = DASAnalyzer.lines_intersect_edges(
+            self.lines,
+            self.signal.shape[1],
+            self.signal.shape[0]
+        )
+
+        lines_df = np.hstack([self.lines, intersect])
+        columns = [
+            'x1', 'y1', 'x2', 'y2',
+            'x1_edge', 'y1_edge', 'x2_edge', 'y2_edge',
+            'y1_edge_ext', 'y2_edge_ext'
+        ]
+        lines_df = pd.DataFrame(lines_df, columns=columns)
+
+        # Define helper functions
+        def get_signal_column(index):
+            return index / self.s_rate + self.signal.columns[0]
+
+        def get_signal_index(index):
+            return (pd.to_timedelta(index / self.t_rate, unit='s')
+                    + self.signal.index[0])
+
+        # Assign new columns
+        lines_df = lines_df.assign(
+            s1=lambda df: df['x1'].map(get_signal_column),
+            t1=lambda df: df['y1'].map(get_signal_index),
+            s2=lambda df: df['x2'].map(get_signal_column),
+            t2=lambda df: df['y2'].map(get_signal_index),
+            s1_edge=lambda df: df['x1_edge'].map(get_signal_column),
+            t1_edge=lambda df: df['y1_edge'].map(get_signal_index),
+            s2_edge=lambda df: df['x2_edge'].map(get_signal_column),
+            t2_edge=lambda df: df['y2_edge'].map(get_signal_index),
+            t1_edge_ext=lambda df: df['y1_edge_ext'].map(get_signal_index),
+            t2_edge_ext=lambda df: df['y2_edge_ext'].map(get_signal_index),
+            s=lambda df: df['s2'] - df['s1'],
+            t=lambda df: (df['t2'] - df['t1']).dt.total_seconds(),
+            speed_ms=lambda df: df['s'] / df['t'],
+            speed_kmh=lambda df: df['speed_ms'] * 3.6,
+        )
+
+        # Reorder columns to make it more readable and convenient
+        ordered_columns = [
+            'speed_kmh', 'speed_ms', 's', 't',
+            's1', 't1', 's2', 't2',
+            's1_edge', 't1_edge', 's2_edge', 't2_edge',
+            't1_edge_ext', 't2_edge_ext',
+            'x1', 'y1', 'x2', 'y2',
+            'x1_edge', 'y1_edge', 'x2_edge', 'y2_edge',
+            'y1_edge_ext', 'y2_edge_ext',
+        ]
+        lines_df = lines_df[ordered_columns]
+        self.lines_df = lines_df
+
+    @staticmethod
+    def reorder_coordinates(lines: np.ndarray) -> np.ndarray:
+        """Reorder the 2 endpoints of lines segments so that y1 <= y2.
+        """
+        lines_cp = lines.copy()
+        # Extract the coordinates
+        x1 = lines_cp[:, 0]
+        y1 = lines_cp[:, 1]
+        x2 = lines_cp[:, 2]
+        y2 = lines_cp[:, 3]
+
+        # Create a mask where y1 > y2
+        mask = y1 > y2
+
+        # Swap coordinates where the mask is True
+        x1[mask], x2[mask] = x2[mask], x1[mask]
+        y1[mask], y2[mask] = y2[mask], y1[mask]
+
+        # Combine the coordinates back into the lines array
+        lines_cp = np.stack((x1, y1, x2, y2), axis=1)
+        return lines_cp
+
     def hough_transform(
         self,
         target_speed: float,
@@ -113,9 +272,9 @@ class DASAnalyzer:
         length_meters: float = None,
         length_seconds: float = None,
         speed_unit: Literal['km/h', 'm/s'] = 'km/h',  # 'km/h' or 'm/s',
-        threshold_percent: float = 0.3,  # needs to cover 30% of the length
+        threshold_percent: float = 0.6,  # needs to cover 60% of the length
         min_line_length_percent: float = 1,  # needs to equal to the length
-        max_line_gap_percent: float = 0.4,  # mustn't interupt > 40% the length
+        max_line_gap_percent: float = 0.2,  # mustn't interupt > 20% the length
     ) -> None:
         """Apply Hough transform to detect lines in the data.
 
@@ -152,166 +311,161 @@ class DASAnalyzer:
         )
         if lines is not None:
             logger.info(f'{len(lines):,} lines are detected.')
-            # self.lines = lines
-            # note that the default shape of output lines is (n, 1, m), where n
-            # is the number of lines and m is the coordindates of the lines.
-            # The additional dimension in the middle is designed to maintain a
-            # consistent multi-dimensional structure, providing flexibility and
-            # compatibility with other OpenCV functions.
-            # For easier manipulation, we can remove the middle dimension by
-            # using np.squeeze() function.
-            self.lines = np.squeeze(lines, axis=1)
+            # note that the default shape of output lines is (N, 1, 4), where n
+            # is the number of lines. The additional dimension in the middle is
+            # designed to maintain a consistent multi-dimensional structure,
+            # providing compatibility with other OpenCV functions. In this
+            # project's context, we only need the 4 coordinates of each line,
+            # so we can remove the middle dimension by np.squeeze() function.
+            # lines = np.squeeze(lines, axis=1)
+            # but this is not good for the case of 1 line detected, in which
+            # they will be squeezed to 1D array. So we use reshape instead.
+            lines = lines.reshape(-1, 4)
+            lines = DASAnalyzer.reorder_coordinates(lines)
         else:
             logger.info('No lines are detected.')
-            self.lines = lines
+
+        self.lines = lines  # None if no lines are detected
+        self._lines_df()
 
     @staticmethod
-    def _distance_to_horizontal(
+    def _y_vals_lines(
         lines: np.ndarray,
         x_coords: np.ndarray,
     ) -> np.ndarray:
-        """Calculate distances (in pixels) from lines to x-coordinates.
+        """Calculate y values of lines at x-coordinates, which is the distances
+        (in pixels) from lines to x-coordinates.
 
         Args:
             lines (np.ndarray): Lines in the format of (x1, y1, x2, y2).
-            x_coords (np.ndarray): X-coordinates to calculate distances.
+            x_coords (np.ndarray): X-coordinates to calculate y values.
 
         Returns:
-            np.ndarray: Distances from lines to x-coordinates
+            np.ndarray: Y values (distance) from lines to x-coordinates
         """
-        lines = np.squeeze(lines)  # remove the middle dimension if any
         x1 = lines[:, 0]
         y1 = lines[:, 1]
         x2 = lines[:, 2]
         y2 = lines[:, 3]
 
-        # Initialize distances array
-        dists = np.full((len(lines), len(x_coords)), np.nan)
-
+        # Suppress divide by zero warning, multiply inf and nan values by 0
         with np.errstate(divide='ignore', invalid='ignore'):
-            # Calculate slopes and intercepts
-            slopes = (y2 - y1) / (x2 - x1)
-            intercepts = y1 - slopes * x1
+            # Formular of a straight line: y = mx + b
+            # Calculate the slope (m) and intercept (b)
+            m = (y2 - y1) / (x2 - x1)
+            b = y1 - m * x1
 
-        # Handle vertical lines separately
-        vert_mask = (x1 == x2)
-        non_vert_mask = ~vert_mask
+            # Calculate y-values at all x-coordinates
+            m_reshaped = m.reshape(-1, 1)
+            x_coords_reshaped = x_coords.reshape(1, -1)
+            b_reshaped = b.reshape(-1, 1)
+            y_vals = m_reshaped * x_coords_reshaped + b_reshaped
 
-        # Calculate y-values for all x-coordinates for non-vertical lines
-        y_vals = (
-            np.outer(slopes[non_vert_mask], x_coords)
-            + intercepts[non_vert_mask][:, None]
-        )
-
-        # Assign the distances (absolute y-vals) for non-vertical lines
-        dists[non_vert_mask] = y_vals
-
-        # For vertical lines, directly assign the y1 value if x == x1
-        vert_dists = np.where(x_coords == x1[:, None], y1[:, None], np.nan)
-        dists[vert_mask] = vert_dists[vert_mask]
-
-        # Mask distances for x-coordinates outside the range [x1, x2]
-        mask = (x_coords < x1[:, None]) | (x_coords > x2[:, None])
-
-        # Assign an arbitrary number (max int32) to distances outside the range
+        # Assign an arbitrary number (max int32) to y values outside the range
         # should not be NAN because DBSCAN cannot handle NAN
-        dists[mask] = np.iinfo(np.int32).max
-
-        return dists
+        # Create a 2D array of column indices
+        col_idx = np.arange(y_vals.shape[1])
+        # Create the mask using broadcasting
+        left_lim = np.min([x1, x2], axis=0)
+        right_lim = np.max([x1, x2], axis=0)
+        mask = (
+            (col_idx >= left_lim[:, np.newaxis]) &
+            (col_idx <= right_lim[:, np.newaxis]))
+        # Apply the mask to replace values outside the limits with the number
+        y_vals_mask = np.where(mask, y_vals, np.iinfo(np.int32).max)
+        y_vals_mask[np.isnan(y_vals_mask)] = np.iinfo(np.int32).max
+        return y_vals_mask
 
     @staticmethod
-    def _distance_to_vertial(
+    def _x_vals_lines(
         lines: np.ndarray,
         y_coords: np.ndarray
     ) -> np.ndarray:
-        """Calculate distances (in pixels) from lines to y-coordinates.
+        """Calculate x values of lines at y-coordinates, which is the distances
+        (in pixels) from lines to y-coordinates.
 
         Args:
             lines (np.ndarray): Lines in the format of (x1, y1, x2, y2).
-            y_coords (np.ndarray): Y-coordinates to calculate distances.
+            y_coords (np.ndarray): Y-coordinates to calculate x values.
 
         Returns:
-            np.ndarray: Distances from lines to y-coordinates
+            np.ndarray: X values (distance) from lines to y-coordinates
         """
-        lines = np.squeeze(lines)  # remove the middle dimension if any
         x1 = lines[:, 0]
         y1 = lines[:, 1]
         x2 = lines[:, 2]
         y2 = lines[:, 3]
 
-        # Initialize distances array
-        dists = np.full((len(lines), len(y_coords)), np.nan)
-
+        # Suppress divide by zero warning, multiply inf and nan values by 0
         with np.errstate(divide='ignore', invalid='ignore'):
-            # Calculate slopes and intercepts
-            slopes = (y2 - y1) / (x2 - x1)
-            intercepts = y1 - slopes * x1
+            # Formular of a straight line: y = mx + b
+            # Calculate the slope (m) and intercept (b)
+            m = (y2 - y1) / (x2 - x1)
+            b = y1 - m * x1
 
-        # Handle horizontal lines separately
-        horiz_mask = (y1 == y2)
-        non_horiz_mask = ~horiz_mask
+            # Calculate y-values at all x-coordinates
+            m_reshaped = m.reshape(-1, 1)
+            y_coords_reshaped = y_coords.reshape(1, -1)
+            b_reshaped = b.reshape(-1, 1)
+            x_vals = (y_coords_reshaped - b_reshaped) / m_reshaped
 
-        # Calculate x-values for all y-coordinates for non-horizontal lines
-        x_vals = (
-            (y_coords - intercepts[non_horiz_mask][:, None])
-            / slopes[non_horiz_mask][:, None]
-        )
-
-        # Assign the distances (absolute x-vals) for non-horizontal lines
-        dists[non_horiz_mask] = x_vals
-
-        # For horizontal lines, directly assign the x1 value if y == y1
-        horiz_distances = np.where(
-            y_coords == y1[:, None], np.abs(x1[:, None]), np.nan)
-        dists[horiz_mask] = horiz_distances[horiz_mask]
-
-        # Mask distances for y-coordinates outside the range [y1, y2]
-        mask = (y_coords < y1[:, None]) | (y_coords > y2[:, None])
-
-        # Assign an arbitrary number (max int32) to distances outside the range
+        # Assign an arbitrary number (max int32) to y values outside the range
         # should not be NAN because DBSCAN cannot handle NAN
-        dists[mask] = np.iinfo(np.int32).max
+        # Create a 2D array of column indices
+        row_idx = np.arange(x_vals.shape[0]).reshape(-1, 1)
+        # Create the mask using broadcasting
+        bottom_lim = np.min([y1, y2], axis=0)
+        top_lim = np.max([y1, y2], axis=0)
+        mask = (
+            (y_coords_reshaped >= bottom_lim[row_idx]) &
+            (y_coords_reshaped <= top_lim[row_idx]))
+        # Apply the mask to replace values outside the limits with the number
+        x_vals_mask = np.where(mask, x_vals, np.iinfo(np.int32).max)
+        x_vals_mask[np.isnan(x_vals_mask)] = np.iinfo(np.int32).max
+        return x_vals_mask
 
-        return dists
+    # @staticmethod
+    # def _metric(
+    #     x: np.ndarray,
+    #     y: np.ndarray,
+    # ) -> float:
+    #     """Calculate the distance between 2 lines in a spatial-temporal data.
+    #     It is the average distance by seconds or average distance by meters
+    #     """
+    #     # replace the arbitrary number max int32 with nan
+    #     arb_num = np.iinfo(np.int32).max
+    #     x = np.where(x == arb_num, np.nan, x)
+    #     y = np.where(y == arb_num, np.nan, y)
+
+    #     abs_dist = np.abs(np.array(x) - np.array(y))
+    #     sum_dist = np.nansum(abs_dist)  # sum of non-nan values
+    #     if sum_dist > 0:
+    #         # mean of non-nan values
+    #         return sum_dist / np.sum(~np.isnan(abs_dist))
+    #     else:
+    #         # if all values are nan, return an arbitrary number
+    #         return arb_num
 
     @staticmethod
-    def _metric(
-        x: np.ndarray,
-        y: np.ndarray,
-    ) -> float:
-        """Calculate the distance between 2 points in a spatial-temporal data.
+    def _metric(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """Calculate the distance between lines in spatial-temporal data.
+        It is the average distance by seconds or average distance by meters.
         """
-        # 1. The fundamental idea is to calculate the distance between 2 points
-        # in a sptial-temporal data. It's not as obvious as the distance btw 2
-        # points in an ordinary 2D space (like an image). Because the unit in
-        # spatial dimension is different from the unit in temporal dimension.
-        # As a result, we must set the relative ratio between the spatial and
-        # temporal distance. So we assume the desired speed (of the interested
-        # signal) creates a 45-degree diagonal line in the spatial-temporal
-        # data. Thus we can calculate the ratio.
-
-        # 2. Imagine 2 parallel lines a and b. If a and b are long, the dist.
-        # between them should be small (they are more similar). If a and b are
-        # short, the distance between them should be large (they are more
-        # distinct). So, if we take the sum of the distance, we will get the
-        # opposite result (more distance for long lines). If we take the mean,
-        # the result will, on the other hand, too harmonized, i.e. long lines
-        # and short lines have the same distance. Therefore, we take the mean
-        # and devided by the number of non-nan values.
-
-        # replace the arbitrary number max int32 with nan
+        # Replace the arbitrary number max int32 with nan
         arb_num = np.iinfo(np.int32).max
         x = np.where(x == arb_num, np.nan, x)
         y = np.where(y == arb_num, np.nan, y)
 
-        abs_dist = np.abs(np.array(x) - np.array(y))
-        sum_dist = np.nansum(abs_dist)  # sum of non-nan values
-        if sum_dist > 0:
-            # mean of non-nan values
-            return sum_dist / np.sum(~np.isnan(abs_dist))
-        else:
-            # if all values are nan, return an arbitrary number
-            return arb_num
+        # Calculate absolute distance and handle NaNs
+        abs_dist = np.abs(x - y)
+        # Sum of non-nan values along the last axis
+        sum_dist = np.nansum(abs_dist, axis=-1)
+        # Count of non-nan values along the last axis
+        count_non_nan = np.sum(~np.isnan(abs_dist), axis=-1)
+        # Calculate mean distance
+        mean_dist = np.where(
+            count_non_nan > 0, sum_dist / count_non_nan, arb_num)
+        return mean_dist
 
     @staticmethod
     def _replace_neg_ones(arr: np.ndarray) -> np.ndarray:
@@ -347,62 +501,11 @@ class DASAnalyzer:
             .assign(cluster=cluster)
             .groupby('cluster')
             .agg(func_name)
+            .round(0)
+            .astype(int)
             .to_numpy()
         )
         return lines_agg
-
-    @staticmethod
-    def lines_inter_edges(
-        lines: np.ndarray,
-        width: int,
-        height: int
-    ) -> pd.DataFrame:
-        """"Calculate intersections of lines with all edges of the image.
-        """
-        lines = np.array(lines).reshape(-1, 4)
-        x1 = lines[:, 0]
-        y1 = lines[:, 1]
-        x2 = lines[:, 2]
-        y2 = lines[:, 3]
-
-        # Calculate slopes (m) and intercepts (c)
-        m = np.divide(
-            (y2 - y1),
-            (x2 - x1),
-            out=np.zeros_like(y1, dtype=float),
-            where=(x2 - x1) != 0
-        )
-        c = y1 - m * x1
-
-        # Calculate intersection points with all edges
-        y_left = c
-        y_right = m * width + c
-        x_top = -c / m
-        x_bottom = (height - c) / m
-
-        # Stack and filter valid intersections within image boundaries
-        left_edges = np.stack([np.zeros_like(y_left), y_left], axis=-1)
-        right_edges = np.stack(
-            [np.full_like(y_right, width), y_right], axis=-1)
-        top_edges = np.stack([x_top, np.zeros_like(x_top)], axis=-1)
-        bottom_edges = np.stack(
-            [x_bottom, np.full_like(x_bottom, height)], axis=-1)
-
-        valid_left = (0 <= y_left) & (y_left <= height)
-        valid_right = (0 <= y_right) & (y_right <= height)
-        valid_top = (0 <= x_top) & (x_top <= width)
-        valid_bottom = (0 <= x_bottom) & (x_bottom <= width)
-
-        # Collect intersections in the same shape as the input lines
-        intersections = np.zeros((lines.shape[0], 4, 2), dtype=int)
-        intersections[:] = -1  # Initialize with -1 (invalid marker)
-
-        intersections[valid_left, 0] = left_edges[valid_left]
-        intersections[valid_right, 1] = right_edges[valid_right]
-        intersections[valid_top, 2] = top_edges[valid_top]
-        intersections[valid_bottom, 3] = bottom_edges[valid_bottom]
-
-        return intersections
 
     def dbscan(
         self,
@@ -422,14 +525,14 @@ class DASAnalyzer:
             raise ValueError('eps_meters or eps_seconds must be provided.')
         if eps_meters:
             eps = eps_meters * self.s_rate
-            lines = DASAnalyzer._distance_to_vertial(
+            lines_distance_to_axis = DASAnalyzer._x_vals_lines(
                 self.lines,
                 np.arange(self.signal.shape[0])
             )
 
         else:
             eps = eps_seconds * self.t_rate
-            lines = DASAnalyzer._distance_to_horizontal(
+            lines_distance_to_axis = DASAnalyzer._y_vals_lines(
                 self.lines,
                 np.arange(self.signal.shape[1])
             )
@@ -439,16 +542,13 @@ class DASAnalyzer:
             eps=eps,
             min_samples=1,  # each line can be a cluster on its own
             metric=DASAnalyzer._metric
-        ).fit(lines)
+        ).fit(lines_distance_to_axis)
 
         # replace labels -1 with increasing values
         cluster = DASAnalyzer._replace_neg_ones(clustering.labels_)
         self.cluster = cluster
 
         # aggregate the lines by the cluster
-        # lines_agg = DASAnalyzer._lines_agg(self.lines, cluster)
-        # self.lines = lines_agg
-
-    def plot_cluster(self) -> None:
-        """Plot the clustered lines."""
-        pass
+        lines_agg = DASAnalyzer._lines_agg(self.lines, cluster)
+        self.lines = lines_agg
+        self._lines_df()
