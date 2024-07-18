@@ -30,8 +30,16 @@ logger = logging.getLogger(__name__)
 
 # Access environment variables to get the database credentials
 # need to set the environment variables in the terminal in advance:
+# determine if bash shell and zsh shell: echo $SHELL
+# determine if bash shell with login:
+# shopt -q login_shell && echo 'Login shell' || echo 'Non-login shell'
+# if bash shell with non-login: nano ~/.bashrc
+# if bash shell with login: nano ~/.bash_profile
+# if zsh shell: nano ~/.zshrc
+# add the following lines to the file:
 # export POSTGRESQL_USERNAME='your_username'
 # export POSTGRESQL_PASSWORD='your_password'
+# save (Ctrl+O) and exit (Ctrl+X)
 
 db_username = os.getenv('POSTGRESQL_USERNAME')
 db_password = os.getenv('POSTGRESQL_PASSWORD')
@@ -160,10 +168,11 @@ def assign_id(df: pd.DataFrame) -> pd.DataFrame:
     """Assign unique ID to each row in the data frame."""
     uuid_list = [str(uuid.uuid4()) for _ in range(len(df))]
     df.insert(0, 'line_id', uuid_list)
+    df.insert(0, 'id', uuid_list)
     return df
 
 
-def reassign_lines_id(
+def reassign_id(
     previous_lines_id: np.ndarray,
     current_lines_id: np.ndarray,
     dist_mat: np.ndarray,
@@ -306,7 +315,7 @@ def run_dasly(file_path: str) -> None:
 
     dist_mat = das._metric(previous_lines_y_vals, lines_y_vals)
 
-    lines_id = reassign_lines_id(
+    lines_id = reassign_id(
         previous_lines_id=previous_lines_df['line_id'].to_numpy(),
         current_lines_id=lines_df['line_id'].to_numpy(),
         dist_mat=dist_mat,
