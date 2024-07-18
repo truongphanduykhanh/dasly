@@ -4,7 +4,7 @@ __author__ = 'khanh.p.d.truong@ntnu.no'
 __date__ = '2024-07-01'
 
 import math
-from typing import Literal
+from typing import Literal, Union
 import logging
 import logging.config
 
@@ -190,6 +190,20 @@ class DASAnalyzer:
         """Create a DataFrame of lines, convert the pixel intersections to
         space and time convinient information.
         """
+        # Ordered columns to make it more readable and convenient
+        ordered_columns = [
+            'speed_kmh', 'speed_ms', 's', 't',
+            's1', 't1', 's2', 't2',
+            's1_edge', 't1_edge', 's2_edge', 't2_edge',
+            't1_edge_ext', 't2_edge_ext',
+            'x1', 'y1', 'x2', 'y2',
+            'x1_edge', 'y1_edge', 'x2_edge', 'y2_edge',
+            'y1_edge_ext', 'y2_edge_ext',
+        ]
+        if len(self.lines) == 0:  # no lines detected
+            self.lines_df = pd.DataFrame(columns=ordered_columns)
+            return  # exit the function from here
+
         intersect = DASAnalyzer.lines_intersect_edges(
             self.lines,
             self.signal.shape[1],
@@ -294,8 +308,6 @@ class DASAnalyzer:
             max_line_gap_percent (float, optional): Maximum line gap factor.
                 Defaults to 0.2.
 
-        Returns:
-            Union[None, pd.DataFrame]: pd.DataFrame if inplace=False.
         """
         theta = self._hough_transform_theta(
             target_speed, speed_res, speed_unit)
@@ -309,8 +321,9 @@ class DASAnalyzer:
             minLineLength=min_line_length_percent * length,
             maxLineGap=max_line_gap_percent * length
         )
-        if lines is not None:
-            logger.info(f'{len(lines):,} lines are detected.')
+        if lines is None:
+            lines = np.empty((0, 4))  # empty array
+        else:  # lines are detected
             # note that the default shape of output lines is (N, 1, 4), where n
             # is the number of lines. The additional dimension in the middle is
             # designed to maintain a consistent multi-dimensional structure,
@@ -322,11 +335,10 @@ class DASAnalyzer:
             # they will be squeezed to 1D array. So we use reshape instead.
             lines = lines.reshape(-1, 4)
             lines = DASAnalyzer.reorder_coordinates(lines)
-        else:
-            logger.info('No lines are detected.')
 
-        self.lines = lines  # None if no lines are detected
+        self.lines = lines
         self._lines_df()
+        logger.info(f'{len(self.lines):,} lines are detected.')
 
     @staticmethod
     def _y_vals_lines(
@@ -424,47 +436,49 @@ class DASAnalyzer:
         x_vals_mask[np.isnan(x_vals_mask)] = np.iinfo(np.int32).max
         return x_vals_mask
 
-    # @staticmethod
-    # def _metric(
-    #     x: np.ndarray,
-    #     y: np.ndarray,
-    # ) -> float:
-    #     """Calculate the distance between 2 lines in a spatial-temporal data.
-    #     It is the average distance by seconds or average distance by meters
-    #     """
-    #     # replace the arbitrary number max int32 with nan
-    #     arb_num = np.iinfo(np.int32).max
-    #     x = np.where(x == arb_num, np.nan, x)
-    #     y = np.where(y == arb_num, np.nan, y)
-
-    #     abs_dist = np.abs(np.array(x) - np.array(y))
-    #     sum_dist = np.nansum(abs_dist)  # sum of non-nan values
-    #     if sum_dist > 0:
-    #         # mean of non-nan values
-    #         return sum_dist / np.sum(~np.isnan(abs_dist))
-    #     else:
-    #         # if all values are nan, return an arbitrary number
-    #         return arb_num
-
     @staticmethod
-    def _metric(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    def _metric(x: np.ndarray, y: np.ndarray) -> Union[np.ndarray, float]:
         """Calculate the distance between lines in spatial-temporal data.
         It is the average distance by seconds or average distance by meters.
+
+        Args:
+            x (np.ndarray): Array of x values of shape (m, n) or (, n).
+            y (np.ndarray): Array of y values of shape (p, n) or (, n).
+
+        Returns:
+            Union[np.ndarray, float]: Distance between lines.
         """
+
         # Replace the arbitrary number max int32 with nan
-        arb_num = np.iinfo(np.int32).max
-        x = np.where(x == arb_num, np.nan, x)
-        y = np.where(y == arb_num, np.nan, y)
+        ARB_NUM = np.iinfo(np.int32).max
+        x = np.where(x == ARB_NUM, np.nan, x)
+        y = np.where(y == ARB_NUM, np.nan, y)
+
+        # Check if x and y are one-dimensional
+        x_is_1d = x.ndim == 1
+        y_is_1d = y.ndim == 1
+
+        # If both x and y are one-dimensional, reshape them to (1, d)
+        if x_is_1d and y_is_1d:
+            x = x.reshape(1, -1)
+            y = y.reshape(1, -1)
+
+        # Expand dimensions of x and y for broadcasting
+        x_exp = np.expand_dims(x, axis=1)  # Shape (m, 1, n)
+        y_exp = np.expand_dims(y, axis=0)  # Shape (1, p, n)
 
         # Calculate absolute distance and handle NaNs
-        abs_dist = np.abs(x - y)
-        # Sum of non-nan values along the last axis
+        abs_dist = np.abs(x_exp - y_exp)  # Shape (m, p, n)
+        # Sum of non-nan values along the last axis, shape (m, p)
         sum_dist = np.nansum(abs_dist, axis=-1)
-        # Count of non-nan values along the last axis
+        # Count of non-nan values along the last axis, shape (m, p)
         count_non_nan = np.sum(~np.isnan(abs_dist), axis=-1)
         # Calculate mean distance
         mean_dist = np.where(
-            count_non_nan > 0, sum_dist / count_non_nan, arb_num)
+            count_non_nan > 0, sum_dist / count_non_nan, ARB_NUM)
+
+        if x_is_1d and y_is_1d:
+            return mean_dist[0, 0]
         return mean_dist
 
     @staticmethod
@@ -519,7 +533,7 @@ class DASAnalyzer:
             eps_seconds (float, optional): Epsilon in seconds. Defaults to
                 None.
         """
-        if self.lines is None:
+        if len(self.lines) == 0:
             return  # no lines to cluster
         if (eps_meters is None) + (eps_seconds is None) != 1:
             raise ValueError('eps_meters or eps_seconds must be provided.')

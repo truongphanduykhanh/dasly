@@ -1,8 +1,8 @@
-print("""1If None, attribute
-      signal is used.""")
+import os
 
-print("2If None, attributesignal is used.",
-      "If None, attributesignal is used.")
+db_username = os.getenv('POSTGRESQL_USERNAME')
+db_password = os.getenv('POSTGRESQL_PASSWORD')
 
-print("3If None, attributesignal is used.", end="")
-print("If None, attributesignal is used.")
+
+print(f'Username: {db_username}')
+print(f'Password: {db_password}')

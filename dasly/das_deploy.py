@@ -13,11 +13,11 @@ import logging
 import numpy as np
 import pandas as pd
 import yaml
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-from dasly.dasly import Dasly
+from dasly.das_master import Dasly
 
 # Set up logger
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -52,9 +52,9 @@ dbapi = params['database']['dbapi']
 endpoint = params['database']['endpoint']
 port = params['database']['port']
 database = params['database']['database']
-table = params['database']['table']
+database_table = params['database']['database_table']
 
-batch_hdf5 = params['batch_hdf5']
+hdf5_file_length = params['hdf5_file_length']
 batch = params['dasly']['batch']
 batch_gap = params['dasly']['batch_gap']
 
@@ -109,20 +109,19 @@ def add_subtract_dt(dt: str, x: int, format: str = '%Y%m%d %H%M%S') -> str:
     return new_dt_str
 
 
-def assign_id(df: pd.DataFrame) -> pd.DataFrame:
-    """Assign unique ID to each row in the data frame."""
-    uuid_list = [str(uuid.uuid4()) for _ in range(len(df))]
-    df.insert(0, 'id', uuid_list)
-    return df
+def create_connection_string() -> str:
+    """Create the connection string for the SQL database."""
+    connection_string = (
+        f'{database_type}+{dbapi}://{db_username}:{db_password}'
+        + f'@{endpoint}:{port}/{database}'
+    )
+    return connection_string
 
 
 def read_sql(query: str) -> pd.DataFrame:
     """Load the data from SQL database."""
     # Create the connection string
-    connection_string = (
-        f'{database_type}+{dbapi}://{db_username}:{db_password}'
-        + f'@{endpoint}:{port}/{database}'
-    )
+    connection_string = create_connection_string()
     # Create an engine
     engine = create_engine(connection_string)
     # Execute a SQL query
@@ -130,24 +129,43 @@ def read_sql(query: str) -> pd.DataFrame:
     return df
 
 
-def write_sql(df: pd.DataFrame, add_created_at: bool = True) -> None:
+def write_sql(
+    df: pd.DataFrame,
+    batch_id: str = None,
+    created_at: bool = True
+) -> None:
     """Write the data to SQL database."""
     # Create the connection string
-    connection_string = (
-        f'{database_type}+{dbapi}://{db_username}:{db_password}'
-        + f'@{endpoint}:{port}/{database}'
-    )
+    connection_string = create_connection_string()
     # Create an engine
     engine = create_engine(connection_string)
     # Execute a SQL query
-    if add_created_at:
-        df['created_at'] = pd.Timestamp.now()
-    df.to_sql(table, engine, if_exists='append', index=False)
+    if batch_id:
+        df.insert(0, 'batch_id', batch_id)
+    if created_at:
+        df.insert(0, 'created_at', pd.Timestamp.now())
+    df.to_sql(database_table, engine, if_exists='append', index=False)
+
+
+def check_table_exists(table_name: str) -> bool:
+    """Check if the table exists in the database.
+    """
+    connection_string = create_connection_string()
+    engine = create_engine(connection_string)
+    inspector = inspect(engine)
+    return inspector.has_table(table_name)
+
+
+def assign_id(df: pd.DataFrame) -> pd.DataFrame:
+    """Assign unique ID to each row in the data frame."""
+    uuid_list = [str(uuid.uuid4()) for _ in range(len(df))]
+    df.insert(0, 'line_id', uuid_list)
+    return df
 
 
 def reassign_lines_id(
     previous_lines_id: np.ndarray,
-    new_lines_id: np.ndarray,
+    current_lines_id: np.ndarray,
     dist_mat: np.ndarray,
     threshold: float
 ) -> np.ndarray:
@@ -157,10 +175,10 @@ def reassign_lines_id(
     threshold, the new line ID is kept.
 
     Args:
-        previous_lines_id (np.ndarray): Previous line IDs.
-        new_lines_id (np.ndarray): New line IDs.
+        previous_lines_id (np.ndarray): Previous line IDs. Shape (N,).
+        current_lines_id (np.ndarray): Current line IDs. Shape (M,).
         dist_mat (np.ndarray): Distance matrix between the previous lines and
-            new lines.
+            new lines. Shape (N, M)
         threshold (float): Threshold to consider the distance as a match.
 
     Returns:
@@ -173,8 +191,9 @@ def reassign_lines_id(
     # Create a mask for distances below the threshold
     mask = min_distances < threshold
     # Create an array to hold the new names
-    new_lines_id = np.where(mask, previous_lines_id[min_indices], new_lines_id)
-    return new_lines_id
+    lines_id_resigned = np.where(
+        mask, previous_lines_id[min_indices], current_lines_id)
+    return lines_id_resigned
 
 
 # Run dasly
@@ -188,7 +207,7 @@ def run_dasly(file_path: str) -> None:
     # Get the first file date and time to load in dasly
     ###########################################################################
     file_dt = extract_dt(file_path)
-    first_file_dt = add_subtract_dt(file_dt, batch_hdf5 - batch)
+    first_file_dt = add_subtract_dt(file_dt, hdf5_file_length - batch)
 
     # Load the data
     ###########################################################################
@@ -215,7 +234,7 @@ def run_dasly(file_path: str) -> None:
         target_speed=(gaussian_smooth_s1 + gaussian_smooth_s2) / 2,
         speed_res=hough_speed_res,
         length_meters=hough_length_meters)
-    if das.lines is not None:
+    if len(das.lines) > 0:
         # store forward lines
         mask = das.lines_df['speed_kmh'].to_numpy() >= 0
         lines = np.concatenate((lines, das.lines[mask]), axis=0)
@@ -235,13 +254,15 @@ def run_dasly(file_path: str) -> None:
         target_speed=(gaussian_smooth_s1 + gaussian_smooth_s2) / 2,
         speed_res=hough_speed_res,
         length_meters=hough_length_meters)
-    if das.lines is not None:
+    if len(das.lines) > 0:
         # store forward lines
         mask = das.lines_df['speed_kmh'].to_numpy() < 0
         lines = np.concatenate((lines, das.lines[mask]), axis=0)
 
     # dbscan forward and backward lines
     ###########################################################################
+    if len(lines) == 0:  # if there are no lines, exit the function from here
+        return
     das.lines = lines  # assign the new lines to the das object
     das.dbscan(eps_seconds=dbscan_eps_seconds)  # group similar lines together
     lines = das.lines
@@ -249,39 +270,57 @@ def run_dasly(file_path: str) -> None:
 
     # load previous data
     ###########################################################################
+    # if the table does not exist yet (first time running dasly)
+    if not check_table_exists(table_name=database_table):
+        write_sql(
+            lines_df,
+            batch_id=pd.Timestamp(file_dt),
+            created_at=True)
+        return  # exit the function from here
     previous_bacth_id = add_subtract_dt(file_dt, -batch_gap)
     previous_bacth_id = (
         pd.Timestamp(previous_bacth_id)
         .strftime('%Y-%m-%d %H:%M:%S')
     )
-    query = f'SELECT * FROM vehicles WHERE batch_id = {previous_bacth_id};'
+    query = (
+        f'SELECT * FROM {database_table}' +
+        f" WHERE batch_id = '{previous_bacth_id}';"
+    )
     previous_lines_df = read_sql(query)
-    previous_lines = previous_lines_df[['x1, y1, x2, y2']].to_numpy()
-    # shift previous lines up (add y values by gap)
-    previous_lines[:, [1, 3]] += batch_gap * das.t_rate
+    if len(previous_lines_df) == 0:  # if there are no previous lines
+        write_sql(
+            lines_df,
+            batch_id=pd.Timestamp(file_dt),
+            created_at=True)
+        return  # exit the function from here
+    previous_lines = previous_lines_df[['x1', 'y1', 'x2', 'y2']].to_numpy()
+    # shift current lines up (add y values by gap)
+    lines = lines.astype(np.float64)
+    lines[:, [1, 3]] += batch_gap * das.t_rate
 
-    # Group the new lines with the previous lines
+    # Group the current lines with the previous lines
     ###########################################################################
     lines_y_vals = das._y_vals_lines(lines, np.arange(das.signal.shape[1]))
     previous_lines_y_vals = das._y_vals_lines(
         previous_lines, np.arange(das.signal.shape[1]))
 
-    lines_y_vals_reshape = lines_y_vals[:, np.newaxis, :]
-    previous_lines_y_vals_reshape = previous_lines_y_vals[np.newaxis, :, :]
-    dist_mat = das._metric(lines_y_vals_reshape, previous_lines_y_vals_reshape)
+    dist_mat = das._metric(previous_lines_y_vals, lines_y_vals)
+
     lines_id = reassign_lines_id(
-        previous_lines_id=previous_lines_df['id'].to_numpy(),
-        new_lines_id=lines['id'].to_numpy(),
+        previous_lines_id=previous_lines_df['line_id'].to_numpy(),
+        current_lines_id=lines_df['line_id'].to_numpy(),
         dist_mat=dist_mat,
-        threshold=1
+        threshold=dbscan_eps_seconds*das.t_rate
     )
-    lines_df['id'] = lines_id
+    lines_df['line_id'] = lines_id
 
     # Append DataFrame to table in PostgreSQL
     ###########################################################################
     # assign batch id (batch id is taken from the file path)
-    lines_df['batch_id'] = pd.Timestamp(file_dt)
-    write_sql(lines_df, add_created_at=True)
+    write_sql(
+        lines_df,
+        batch_id=pd.Timestamp(file_dt),
+        created_at=True)
 
 
 # Define the event handler class
@@ -299,22 +338,60 @@ class MyHandler(FileSystemEventHandler):
         self.event_count = 0  # Initialize the event count
         self.last_created = None
 
-    def on_any_event(self, event):
-        """Event handler for any file system event
+    # def on_any_event(self, event):
+    #     """Print all events and their attributes. This is for testing only.
+    #     Comment out when deploying.
+    #     """
+    #     print(f'type event: {type(event)}')
+    #     print(f'event_type: {event.event_type}')
+    #     print(f'is_directory: {event.is_directory}')
+    #     print(f'src_path: {event.src_path}')
+    #     try:  # Check if the event is a file move (that there exists dest_path)
+    #         print(f'dest_path: {event.dest_path}')
+    #     except Exception:
+    #         pass
+    #     print()  # Print an empty line
+
+    # def on_any_event(self, event):
+    #     """Event handler for any file system event
+    #     """
+    #     if event.is_directory:  # Skip directories
+    #         return
+    #     if (
+    #         # Check if the event is a file move
+    #         event.event_type == 'moved' and
+    #         # Ensure the destination path is not None
+    #         event.dest_path is not None and
+    #         # Ensure the file is not a duplicate
+    #         event.dest_path != self.last_created
+    #     ):
+    #         time.sleep(1)  # Wait for the file to be completely written
+    #         logger.info(f'New hdf5: {event.dest_path}')
+    #         self.last_created = event.dest_path  # Update the last created file
+    #         # In case we set the batch more than 10 seconds (i.e. wait for more
+    #         # than one file to be created before running dasly), we need to
+    #         # count the number of events and run dasly only when the event
+    #         # count reaches the threshold
+    #         self.event_count += 1
+    #         if self.event_count >= self.event_thresh:
+    #             logger.info('Runing dasly...')
+    #             run_dasly(event.dest_path)
+    #             self.event_count = 0  # Reset the event count
+
+    def on_created(self, event):
+        """Event handler for file creation (copying or moving).
         """
-        if event.is_directory:  # Skip directories
-            return
         if (
-            # Check if the event is a file move
-            event.event_type == 'moved' and
-            # Ensure the destination path is not None
-            event.dest_path is not None and
-            # Ensure the file is not a duplicate
-            event.dest_path != self.last_created
+            # Check if the event is a hdf5 file
+            event.src_path.endswith('.hdf5') and
+            # Ensure the file is not a duplicate (sometimes watchdog triggers
+            # the created event twice for the same file. This should be a bug
+            # and we need to work around it by storing the last created file)
+            event.src_path != self.last_created
         ):
             time.sleep(1)  # Wait for the file to be completely written
-            logger.info(f'New hdf5: {event.dest_path}')
-            self.last_created = event.dest_path  # Update the last created file
+            logger.info(f'New hdf5: {event.src_path}')
+            self.last_created = event.src_path  # Update the last created file
             # In case we set the batch more than 10 seconds (i.e. wait for more
             # than one file to be created before running dasly), we need to
             # count the number of events and run dasly only when the event
@@ -322,7 +399,7 @@ class MyHandler(FileSystemEventHandler):
             self.event_count += 1
             if self.event_count >= self.event_thresh:
                 logger.info('Runing dasly...')
-                run_dasly(event.dest_path)
+                run_dasly(event.src_path)
                 self.event_count = 0  # Reset the event count
 
 
@@ -331,7 +408,7 @@ class MyHandler(FileSystemEventHandler):
 ###############################################################################
 ###############################################################################
 # how many files to wait before running dasly
-event_thresh = batch_gap / batch_hdf5
+event_thresh = batch_gap / hdf5_file_length
 # Initialize the Observer and EventHandler
 event_handler = MyHandler(event_thresh=event_thresh)
 observer = Observer()
