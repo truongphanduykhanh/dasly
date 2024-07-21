@@ -473,10 +473,11 @@ class DASAnalyzer:
         sum_dist = np.nansum(abs_dist, axis=-1)
         # Count of non-nan values along the last axis, shape (m, p)
         count_non_nan = np.sum(~np.isnan(abs_dist), axis=-1)
-        # Calculate mean distance
-        mean_dist = np.where(
-            count_non_nan > 0, sum_dist / count_non_nan, ARB_NUM)
-
+        # Suppress divide and invalid warnings
+        with np.errstate(divide='ignore', invalid='ignore'):
+            # Calculate mean distance
+            mean_dist = np.where(
+                count_non_nan > 0, sum_dist / count_non_nan, ARB_NUM)
         if x_is_1d and y_is_1d:
             return mean_dist[0, 0]
         return mean_dist

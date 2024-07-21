@@ -27,7 +27,7 @@ class DASSampler:
         self,
         seconds: int = None,
         meters: int = None,  # should be a multipler of the channels gap
-        func_name: str = 'first',
+        agg_func: callable = np.nanmean,
         inplace: bool = True
     ) -> Union[None, pd.DataFrame]:
         """Sample the data by a given number of seconds and meters.
@@ -41,7 +41,8 @@ class DASSampler:
                 Defaults to None.
             meters (int, optional): Number of meters to group the data.
                 Defaults to None.
-            func_name (str, optional): Aggregation func. Defaults to 'first'.
+            agg_func (callable, optional): Aggregation function. Should be one
+                that ignore NaN values. Defaults to np.nanmean.
             inplace (bool, optional): If overwrite attribute signal. Defaults
                 to True.
 
@@ -49,35 +50,57 @@ class DASSampler:
             Union[None, pd.DataFrame]: pd.DataFrame if inplace=False.
         """
         # check arguments
-        if seconds is None:
+        if seconds is None:  # keep the original sampling rate
             seconds = 1 / self.t_rate
-        if meters is None:
+        if meters is None:  # keep the original sampling rate
             meters = 1 / self.s_rate
-        # create antificial groups
-        factor_rows = seconds * self.t_rate
-        group_rows = np.arange(len(self.signal)) // factor_rows
 
-        factor_columns = meters * self.s_rate
-        group_columns = np.arange(len(self.signal.columns)) // factor_columns
+        signal_np = self.signal.to_numpy()
+        signal_shape = signal_np.shape
+        block_shape = (int(seconds * self.t_rate), int(meters * self.s_rate))
 
-        signal_sample = self.signal.copy()
-        signal_sample.index = group_rows
-        signal_sample.columns = group_columns
-
-        # group by rows and columns
-        #######################################################################
-        signal_sample = (
-            signal_sample
-            .stack()
-            .groupby(level=[0, 1])
-            .agg(func_name)
-            .unstack()
+        # Calculate the new shape of the reduced image
+        signal_shape_new = (
+            int(np.ceil(signal_shape[0] / block_shape[0])),
+            int(np.ceil(signal_shape[1] / block_shape[1]))
         )
-        # update indices and columns
-        #######################################################################
-        signal_sample.index = self.signal.index[::int(factor_rows)]
-        signal_sample.columns = self.signal.columns[::int(factor_columns)]
 
+        # Calculate padding for height
+        pad_height = (
+            (block_shape[0] - signal_shape[0] % block_shape[0])
+            % block_shape[0]
+        )
+        # Calculate padding for width
+        pad_width = (
+            (block_shape[1] - signal_shape[1] % block_shape[1])
+            % block_shape[1]
+        )
+
+        # Pad the image with zeros so that its dimensions are exactly divisible
+        # by the block size
+        signal_padded = np.pad(
+            signal_np,
+            ((0, pad_height), (0, pad_width)),
+            mode='constant',
+            constant_values=np.nan
+        )
+        signal_reshaped = signal_padded.reshape((
+            signal_shape_new[0],
+            block_shape[0],
+            signal_shape_new[1],
+            block_shape[1]
+        ))
+        signal_sample = agg_func(signal_reshaped, axis=(1, 3))
+
+        # index and columns
+        df_idx = self.signal.index[::block_shape[0]]
+        df_cols = self.signal.columns[::block_shape[1]]
+
+        signal_sample = pd.DataFrame(
+            signal_sample,
+            index=df_idx,
+            columns=df_cols
+        )
         # return
         #######################################################################
         if inplace:
@@ -214,7 +237,7 @@ class DASSampler:
             self.signal = signal_decimate
             self._update_t_rate()  # in das_loader.py
             logger.info('Signal updated with new temporal sampling rate '
-                        + f'{self.t_rate:.0f}.')
+                        + f'{self.t_rate:.0g}.')
             return None
         else:
             return signal_decimate

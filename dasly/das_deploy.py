@@ -355,7 +355,7 @@ class MyHandler(FileSystemEventHandler):
     #     print(f'event_type: {event.event_type}')
     #     print(f'is_directory: {event.is_directory}')
     #     print(f'src_path: {event.src_path}')
-    #     try:  # Check if the event is a file move (that there exists dest_path)
+    #     try:  # Check if the event is a file move (there exists dest_path)
     #         print(f'dest_path: {event.dest_path}')
     #     except Exception:
     #         pass

@@ -166,7 +166,7 @@ class DASLoader:
         end: Union[str, datetime] = None,
         fmt: str = '%Y%m%d %H%M%S',
         suppress_date: bool = False,
-        chIndex: np.ndarray = None,
+        chIndex: Union[slice, list[int], np.ndarray] = None,
         integrate: bool = True,
     ) -> None:
         """Load data to the instance.
@@ -188,8 +188,8 @@ class DASLoader:
                 '%Y%m%d %H%M%S'.
             suppress_date (bool, optional): If True, keep only time as index if
                 all the data come from the same date. Defaults to False.
-            chIndex (np.ndarray, optional): Channel index. See more at
-                simpleDASreader. Defaults to None.
+            chIndex (Union[slice, list[int], np.ndarray], optional): Channel
+                index. See more at simpleDASreader. Defaults to None.
             integrate (bool, optional): If True, integrate the data to get
                 strain unit. Otherwise, the data is in strain rate unit. See
                 more at simpleDASreader. Defaults to True

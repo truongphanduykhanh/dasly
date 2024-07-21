@@ -441,7 +441,11 @@ class DASFilter:
         else:
             return signal_gauss
 
-    def sobel_filter(self, inplace: bool = True) -> Optional[pd.DataFrame]:
+    def sobel_filter(
+        self,
+        pos_grads: bool = True,
+        inplace: bool = True
+    ) -> Optional[pd.DataFrame]:
         """Apply Sobel operator to detect edges in the signal attribute.
 
         The Sobel operator is used to detect gradients in the x and y
@@ -449,6 +453,8 @@ class DASFilter:
         highlight edges.
 
         Args:
+            pos_grads (bool, optional): If True, only positive gradients are
+                kept. Negative gradients are set to zero. Defaults to True.
             inplace (bool, optional): If True, modifies the signal attribute in
                 place. Otherwise, returns a new DataFrame. Defaults to True.
 
@@ -464,9 +470,10 @@ class DASFilter:
         sobel_x = convolve(self.signal.values, sobel_kernel_x)
         sobel_y = convolve(self.signal.values, sobel_kernel_y)
 
-        # Filter only possitive gradients
-        sobel_x = np.maximum(sobel_x, 0)
-        sobel_y = np.maximum(sobel_y, 0)
+        if pos_grads:
+            # Filter only possitive gradients
+            sobel_x = np.maximum(sobel_x, 0)
+            sobel_y = np.maximum(sobel_y, 0)
 
         # Calculate the magnitude of the gradient
         gradient_magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
