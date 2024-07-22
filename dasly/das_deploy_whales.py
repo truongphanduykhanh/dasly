@@ -45,7 +45,7 @@ db_username = os.getenv('POSTGRESQL_USERNAME')
 db_password = os.getenv('POSTGRESQL_PASSWORD')
 
 # Define the path to the YAML file
-yaml_path = 'config.yml'
+yaml_path = 'config_whales.yml'
 
 # Open and read the YAML file
 with open(yaml_path, 'r') as file:
@@ -68,17 +68,24 @@ hdf5_file_length = params['hdf5_file_length']
 batch = params['dasly']['batch']
 batch_gap = params['dasly']['batch_gap']
 
-lowpass_filter_freq = params['lowpass_filter_freq']
-decimate_t_rate = params['decimate_t_rate']
+bandpass_filter_low = params['bandpass_filter']['low']
+bandpass_filter_high = params['bandpass_filter']['high']
+
+sample_meters = params['sample']['meters']
+sample_seconds = params['sample']['seconds']
 
 gaussian_smooth_s1 = params['gaussian_smooth']['s1']
 gaussian_smooth_s2 = params['gaussian_smooth']['s2']
 gaussian_smooth_std_s = params['gaussian_smooth']['std_s']
+gauusian_smooth_unit = params['gaussian_smooth']['unit']
 
 binary_threshold = params['binary_threshold']
 
 hough_speed_res = params['hough_transform']['speed_res']
 hough_length_meters = params['hough_transform']['length_meters']
+hough_threshold_percent = params['hough_transform']['threshold_percent']
+hough_max_line_gap_percent = params['hough_transform']['max_line_gap_percent']
+hough_speed_unit = params['hough_transform']['speed_unit']
 
 dbscan_eps_seconds = params['dbscan_eps_seconds']
 
@@ -222,60 +229,41 @@ def run_dasly(file_path: str) -> None:
 
     # Load the data
     ###########################################################################
-    lines = np.empty((0, 4))  # create an empty array to store the lines
+    s_rate = 0.25
     das = Dasly()
     das.load_data(
         folder_path=input_dir,
         start=first_file_dt,
         duration=batch,
         start_exact_second=start_exact_second,
-        integrate=integrate
+        integrate=integrate,
+        chIndex=np.arange(round(5000 * s_rate), round(90000 * s_rate))
     )
 
-    # forward Gaussian smoothing
-    ###########################################################################
-    das.lowpass_filter(cutoff=lowpass_filter_freq)
-    das.decimate(t_rate=decimate_t_rate)
+    das.bandpass_filter(low=bandpass_filter_low, high=bandpass_filter_high)
+    das.signal = np.abs(das.signal)
+    das.sample(meters=sample_meters, seconds=sample_seconds)
     das.gaussian_smooth(
         s1=gaussian_smooth_s1,
         s2=gaussian_smooth_s2,
-        std_s=gaussian_smooth_std_s)
+        std_s=gaussian_smooth_std_s,
+        unit=gauusian_smooth_unit
+    )
     das.sobel_filter()
     das.binary_transform(threshold=binary_threshold)
     das.hough_transform(
         target_speed=(gaussian_smooth_s1 + gaussian_smooth_s2) / 2,
         speed_res=hough_speed_res,
-        length_meters=hough_length_meters)
-    if len(das.lines) > 0:
-        # store forward lines
-        mask = das.lines_df['speed_kmh'].to_numpy() >= 0
-        lines = np.concatenate((lines, das.lines[mask]), axis=0)
-
-    # backward Gaussian smoothing
-    ###########################################################################
-    das.reset()
-    das.lowpass_filter(cutoff=lowpass_filter_freq)
-    das.decimate(t_rate=decimate_t_rate)
-    das.gaussian_smooth(
-        s1=-gaussian_smooth_s2,
-        s2=-gaussian_smooth_s1,
-        std_s=gaussian_smooth_std_s)
-    das.sobel_filter()
-    das.binary_transform(threshold=binary_threshold)
-    das.hough_transform(
-        target_speed=(gaussian_smooth_s1 + gaussian_smooth_s2) / 2,
-        speed_res=hough_speed_res,
-        length_meters=hough_length_meters)
-    if len(das.lines) > 0:
-        # store forward lines
-        mask = das.lines_df['speed_kmh'].to_numpy() < 0
-        lines = np.concatenate((lines, das.lines[mask]), axis=0)
+        length_meters=hough_length_meters,
+        threshold_percent=hough_threshold_percent,
+        max_line_gap_percent=hough_max_line_gap_percent,
+        speed_unit=hough_speed_unit
+    )
 
     # dbscan forward and backward lines
     ###########################################################################
-    if len(lines) == 0:  # if there are no lines, exit the function from here
+    if len(das.lines) == 0:  # if there are no lines, exit the function
         return
-    das.lines = lines  # assign the new lines to the das object
     das.dbscan(eps_seconds=dbscan_eps_seconds)  # group similar lines together
     lines = das.lines
     lines_df = assign_id(das.lines_df)  # assign unique id to each line
@@ -364,32 +352,6 @@ class MyHandler(FileSystemEventHandler):
     #         pass
     #     print()  # Print an empty line
 
-    # def on_any_event(self, event):
-    #     """Event handler for any file system event
-    #     """
-    #     if event.is_directory:  # Skip directories
-    #         return
-    #     if (
-    #         # Check if the event is a file move
-    #         event.event_type == 'moved' and
-    #         # Ensure the destination path is not None
-    #         event.dest_path is not None and
-    #         # Ensure the file is not a duplicate
-    #         event.dest_path != self.last_created
-    #     ):
-    #         time.sleep(1)  # Wait for the file to be completely written
-    #         logger.info(f'New hdf5: {event.dest_path}')
-    #         self.last_created = event.dest_path  # Update the last created file
-    #         # In case we set the batch more than 10 seconds (i.e. wait for more
-    #         # than one file to be created before running dasly), we need to
-    #         # count the number of events and run dasly only when the event
-    #         # count reaches the threshold
-    #         self.event_count += 1
-    #         if self.event_count >= self.event_thresh:
-    #             logger.info('Runing dasly...')
-    #             run_dasly(event.dest_path)
-    #             self.event_count = 0  # Reset the event count
-
     def on_created(self, event):
         """Event handler for file creation (copying or moving).
         """
@@ -401,7 +363,7 @@ class MyHandler(FileSystemEventHandler):
             # and we need to work around it by storing the last created file)
             event.src_path != self.last_created
         ):
-            time.sleep(1)  # Wait for the file to be completely written
+            time.sleep(3)  # Wait for the file to be completely written
             logger.info(f'New hdf5: {event.src_path}')
             self.last_created = event.src_path  # Update the last created file
             # In case we set the batch more than 10 seconds (i.e. wait for more

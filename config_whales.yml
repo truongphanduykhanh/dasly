@@ -1,0 +1,46 @@
+# input_dir should contain the following structure: /YYYYMMDD/dphi/HHMMSS.hdf5
+input_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/test_input
+start_exact_second: False  # for deployment, set to False
+integrate: True  # integrate the data (strain unit)
+
+database:
+  database_type: postgresql
+  dbapi: psycopg2
+  endpoint: 129.241.154.236
+  port: 5432
+  database: svalbard
+  database_table: whales
+
+hdf5_file_length: 10  # length of each hdf5 file, in seconds (this is fixed)
+
+dasly:
+  batch: 40  # length of each batch, in seconds
+  batch_gap: 20  # gap between the batch, in seconds, multiple of batch_hdf5
+
+bandpass_filter:
+  low: 15
+  high: 25
+
+sample:
+  meters: 100
+  seconds: 0.04  # 1/25, original t_rate is 625Hz (=> merge every 25 samples)
+
+gaussian_smooth:
+  s1: -1500.01
+  s2: -1500
+  std_s: 500
+  unit: 'm/s'
+
+binary_threshold: 2.1e-11
+
+hough_transform:
+    speed_res: 10
+    length_meters: 4000
+    threshold_percent: 0.8
+    max_line_gap_percent: 0.1
+    speed_unit: 'm/s'
+
+dbscan_eps_seconds: 3
+
+# this is the path to the integrator (only for testing)
+integrator_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/svalbard

@@ -1,5 +1,7 @@
-input_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/test_input
 # input_dir should contain the following structure: /YYYYMMDD/dphi/HHMMSS.hdf5
+input_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/test_input
+start_exact_second: False  # for deployment, set to False
+integrate: False  # do not integrate the data (strain rate unit)
 
 database:
   database_type: postgresql
@@ -34,4 +36,4 @@ hough_transform:
 dbscan_eps_seconds: 1
 
 # this is the path to the integrator (only for testing)
-integrator_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/test_integrator
+integrator_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/aastfjordbrua

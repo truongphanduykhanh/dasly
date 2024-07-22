@@ -7,6 +7,8 @@ import logging
 import logging.config
 from typing import Union
 from datetime import datetime, timedelta, time
+import re
+import os
 
 import numpy as np
 import pandas as pd
@@ -69,7 +71,8 @@ def infer_time(
 def get_file_paths(
     folder_path: str,
     start: Union[str, datetime] = None,
-    duration: int = None
+    duration: int = None,
+    start_exact_second: bool = True
 ) -> list[str]:
     """Get hdf5 files paths given the folder and time constraints.
 
@@ -77,26 +80,104 @@ def get_file_paths(
         folder_path (str): Experiment folder. Must inlcude date folders in
             right next level.
         start (Union[str, datetime], optional): Start time. If string, must
-            be in format YYMMDD HHMMSS, specify in argument format
-            otherwise. Defaults to None.
-        duration (int, optional): Duration of the time in seconds. Defaults
-            to None.
+            be in format YYMMDD HHMMSS. If start and duration are not given, it
+            will list all hdf5 files in folder_path. Defaults to None.
+        duration (int, optional): Duration of the time in seconds. If start and
+            duration are not given, it will list all hdf5 files in folder_path.
+            Defaults to None.
+        start_exact_second (bool, optional): If True, the file paths will
+            ensure to include the file that starts at begining second of
+            start time, and up tp end time (exclusive). If False, the file
+            paths may not start the at the begining second of start time
+            (some milliseconds after) and duration is ensured (so the
+            actual end time my be some milliseconds after). This argument
+            is especially useful when deploying because it will not load
+            one additional file. Defaults to True.
 
     Returns:
         list[str]: HDF5 files paths.
     """
-    # Get file paths
-    #######################################################################
+    # Get all hdf5 files paths if no time constraints
+    ###########################################################################
+    def list_hdf5_files(folder_path: str) -> list[str]:
+        """List all hdf5 files in the folder path.
+
+        Args:
+            folder_path (str): Folder path.
+
+        Returns:
+            list[str]: List of hdf5 files paths.
+        """
+        hdf5_files = []
+        for root, dirs, files in os.walk(folder_path):
+            for file in files:
+                if file.endswith('.hdf5'):
+                    hdf5_files.append(os.path.join(root, file))
+        return hdf5_files
+
+    if start is None and duration is None:
+        file_paths = list_hdf5_files(folder_path)
+        return file_paths
+
+    # Get hdf5 files paths given the time constraints
+    ###########################################################################
     file_paths, _, _ = simpleDASreader.find_DAS_files(
         experiment_path=folder_path,
         start=start,
         duration=duration,
         show_header_info=False
     )
+
+    # Be careful with simpleDASreader.find_DAS_files(). It always ensures to
+    # load the start (inclusive) and end (inclusive). On the other hand, data
+    # in a file does not always start at the begining of the second. So
+    # simpleDASreader.find_DAS_files() may include the file that before the
+    # start time. For example, if the start is 093015 and the file does not
+    # start at the begining of the second, it will include the file 093005.
+    # If the start at the begining of the second and duration is 30 seconds, it
+    # will include the file 093015 at 093045 (inclusive).
+
+    def extract_date_time(file_path: str) -> str:
+        """Extract date and time from the file path.
+
+        Args:
+            file_path (str): File path.
+
+        Returns:
+            str: Date and time in format 'YYYYMMDD HHMMSS'.
+        """
+        # Use regular expressions to extract the date and time parts
+        date_match = re.search(r'/(\d{8})/', file_path)
+        time_match = re.search(r'/(\d{6})\.hdf5$', file_path)
+
+        if date_match and time_match:
+            date = date_match.group(1)
+            time = time_match.group(1)
+            result = f'{date} {time}'
+            return result
+        else:
+            return 'Date or time not found in the string'
+
+    first_file = extract_date_time(file_paths[0])
+    second_file = extract_date_time(file_paths[1])
+
+    if not start_exact_second:  # for deployment
+        start_datetime = isinstance(start, datetime)
+        # Convert start to string for comparison
+        if start_datetime:
+            start = start.strftime('%Y%m%d %H%M%S')
+        # Drop the first file if file does not start at the begining of second
+        # i.e. the first file is before the start time
+        if start == second_file and duration % 10 == 0:
+            file_paths = file_paths[1:]  # drop the first file
+        # Convert start back to datetime
+        if start_datetime:
+            start = datetime.strptime(start, '%Y%m%d %H%M%S')
+
     # Verbose
     #######################################################################
-    first_file = file_paths[0].split('/')[-1].split('.')[0]
-    last_file = file_paths[-1].split('/')[-1].split('.')[0]
+    first_file = extract_date_time(file_paths[0])
+    last_file = extract_date_time(file_paths[-1])
     logger.info(
         f'{len(file_paths)} files, from {first_file} to {last_file}')
     return file_paths
@@ -164,10 +245,11 @@ class DASLoader:
         start: Union[str, datetime] = None,
         duration: int = None,
         end: Union[str, datetime] = None,
+        start_exact_second: bool = True,
         fmt: str = '%Y%m%d %H%M%S',
         suppress_date: bool = False,
         chIndex: Union[slice, list[int], np.ndarray] = None,
-        integrate: bool = True,
+        integrate: bool = True
     ) -> None:
         """Load data to the instance.
 
@@ -184,6 +266,14 @@ class DASLoader:
             end (Union[str, datetime], optional): End time. If string, must be
                 in format YYMMDD HHMMSS, specify in argument format otherwise.
                 Defaults to None.
+            start_exact_second (bool, optional): If True, the file paths will
+                ensure to include the file that starts at begining second of
+                start time, and up tp end time (exclusive). If False, the file
+                paths may not start the at the begining second of start time
+                (some milliseconds after) and duration is ensured (so the
+                actual end time my be some milliseconds after). This argument
+                is especially useful when deploying because it will not load
+                one additional file. Defaults to True.
             format (str, optional): Format of start, end. Defaults to
                 '%Y%m%d %H%M%S'.
             suppress_date (bool, optional): If True, keep only time as index if
@@ -195,7 +285,7 @@ class DASLoader:
                 more at simpleDASreader. Defaults to True
         """
         slicing = False  # not slicing the data later if file_paths is given
-        if not file_paths:
+        if not file_paths:  # if file_paths is not given
             slicing = True  # use for slicing the data later
             # Infer start, end, duration
             start, duration, end = infer_time(
@@ -208,7 +298,8 @@ class DASLoader:
             file_paths = get_file_paths(
                 folder_path=folder_path,
                 start=start,
-                duration=duration
+                duration=duration,
+                start_exact_second=start_exact_second
             )
         # Load data
         signal = simpleDASreader.load_DAS_files(
@@ -223,7 +314,7 @@ class DASLoader:
         )
         signal = pd.DataFrame(signal)
         # Slice the data
-        if slicing:
+        if slicing and start_exact_second:
             signal = signal.loc[start:end]  # extact only the range start-end
             signal = signal.iloc[:-1]  # drop the last record (new second)
         self.start = np.min(signal.index)
