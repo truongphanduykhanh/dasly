@@ -149,30 +149,41 @@ def get_file_paths(
         # Use regular expressions to extract the date and time parts
         date_match = re.search(r'/(\d{8})/', file_path)
         time_match = re.search(r'/(\d{6})\.hdf5$', file_path)
+        date = date_match.group(1)
+        time = time_match.group(1)
+        result = f'{date} {time}'
+        return result
 
-        if date_match and time_match:
-            date = date_match.group(1)
-            time = time_match.group(1)
-            result = f'{date} {time}'
-            return result
-        else:
-            return 'Date or time not found in the string'
+    ###########################################################################
+    # Check if start is datetime
+    start_datetime = isinstance(start, datetime)
+    # Convert start to string for comparison
+    if start_datetime:
+        start = start.strftime('%Y%m%d %H%M%S')
 
-    first_file = extract_date_time(file_paths[0])
-    second_file = extract_date_time(file_paths[1])
+    # if duration is multiple of 10 and start is the exact second, drop the
+    # last file because it is redundant. But instead of dropping directly the
+    # last file, we slice the file paths in case there is not enough files,
+    # i.e. the last file is not redundant.
+    if duration % 10 == 0 and start == extract_date_time(file_paths[0]):
+        n = duration // 10  # number of files to load
+        file_paths = file_paths[: n]  # slice the file paths
 
-    if not start_exact_second:  # for deployment
-        start_datetime = isinstance(start, datetime)
-        # Convert start to string for comparison
-        if start_datetime:
-            start = start.strftime('%Y%m%d %H%M%S')
-        # Drop the first file if file does not start at the begining of second
-        # i.e. the first file is before the start time
-        if start == second_file and duration % 10 == 0:
-            file_paths = file_paths[1:]  # drop the first file
-        # Convert start back to datetime
-        if start_datetime:
-            start = datetime.strptime(start, '%Y%m%d %H%M%S')
+    # if duration is multiple of 10 and start is not the exact second but the
+    # start_exact_second is False (for deployment), we also slice the file
+    # paths
+    elif (
+        duration % 10 == 0 and
+        len(file_paths) > 2 and
+        start == extract_date_time(file_paths[1]) and
+        not start_exact_second
+    ):  # for deployment
+        n = duration // 10  # number of files to load
+        file_paths = file_paths[1: n]  # slice the file paths
+
+    # Convert start back to datetime
+    if start_datetime:
+        start = datetime.strptime(start, '%Y%m%d %H%M%S')
 
     # Verbose
     #######################################################################

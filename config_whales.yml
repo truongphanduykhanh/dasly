@@ -14,7 +14,7 @@ database:
 hdf5_file_length: 10  # length of each hdf5 file, in seconds (this is fixed)
 
 dasly:
-  batch: 40  # length of each batch, in seconds
+  batch: 30  # length of each batch, in seconds
   batch_gap: 20  # gap between the batch, in seconds, multiple of batch_hdf5
 
 bandpass_filter:

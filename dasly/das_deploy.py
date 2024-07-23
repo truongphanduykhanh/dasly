@@ -153,7 +153,7 @@ def write_sql(
     if batch_id:
         df.insert(0, 'batch_id', batch_id)
     if created_at:
-        df.insert(0, 'created_at', pd.Timestamp.now())
+        df.insert(0, 'created_at', pd.Timestamp.now(tz='UTC'))
     df.to_sql(database_table, engine, if_exists='append', index=False)
 
 

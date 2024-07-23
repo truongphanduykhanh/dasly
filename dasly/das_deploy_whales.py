@@ -160,7 +160,7 @@ def write_sql(
     if batch_id:
         df.insert(0, 'batch_id', batch_id)
     if created_at:
-        df.insert(0, 'created_at', pd.Timestamp.now())
+        df.insert(0, 'created_at', pd.Timestamp.now(tz='UTC'))
     df.to_sql(database_table, engine, if_exists='append', index=False)
 
 
@@ -363,7 +363,7 @@ class MyHandler(FileSystemEventHandler):
             # and we need to work around it by storing the last created file)
             event.src_path != self.last_created
         ):
-            time.sleep(3)  # Wait for the file to be completely written
+            time.sleep(1)  # Wait for the file to be completely written
             logger.info(f'New hdf5: {event.src_path}')
             self.last_created = event.src_path  # Update the last created file
             # In case we set the batch more than 10 seconds (i.e. wait for more
