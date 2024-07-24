@@ -364,54 +364,54 @@ class MyHandler(FileSystemEventHandler):
     #         pass
     #     print()  # Print an empty line
 
-    # def on_any_event(self, event):
-    #     """Event handler for any file system event
+    # def on_created(self, event):
+    #     """Event handler for file creation (copying or moving). This is for
+    #     testing only. Comment out when deploying.
     #     """
-    #     if event.is_directory:  # Skip directories
-    #         return
     #     if (
-    #         # Check if the event is a file move
-    #         event.event_type == 'moved' and
-    #         # Ensure the destination path is not None
-    #         event.dest_path is not None and
-    #         # Ensure the file is not a duplicate
-    #         event.dest_path != self.last_created
+    #         # Check if the event is a hdf5 file
+    #         event.src_path.endswith('.hdf5') and
+    #         # Ensure the file is not a duplicate (sometimes watchdog triggers
+    #         # the created event twice for the same file. This should be a bug
+    #         # and we need to work around it by storing the last created file)
+    #         event.src_path != self.last_created
     #     ):
     #         time.sleep(1)  # Wait for the file to be completely written
-    #         logger.info(f'New hdf5: {event.dest_path}')
-    #         self.last_created = event.dest_path  # Update the last created file
-    #         # In case we set the batch more than 10 seconds (i.e. wait for more
-    #         # than one file to be created before running dasly), we need to
-    #         # count the number of events and run dasly only when the event
+    #         logger.info(f'New hdf5: {event.src_path}')
+    #         self.last_created = event.src_path  # Update the last created
+    #         # In case we set the batch more than 10 seconds (i.e. wait for
+    #         # more than one file to be created before running dasly), we need
+    #         # to count the number of events and run dasly only when the event
     #         # count reaches the threshold
     #         self.event_count += 1
     #         if self.event_count >= self.event_thresh:
     #             logger.info('Runing dasly...')
-    #             run_dasly(event.dest_path)
+    #             run_dasly(event.src_path)
     #             self.event_count = 0  # Reset the event count
 
-    def on_created(self, event):
-        """Event handler for file creation (copying or moving).
+    def on_moved(self, event):
+        """Event handler for file moving. In integrator, when a hdf5 file is
+        completely written, it is moved from hdf5.tmp to hdf5.
         """
         if (
             # Check if the event is a hdf5 file
-            event.src_path.endswith('.hdf5') and
+            event.dest_path.endswith('.hdf5') and
             # Ensure the file is not a duplicate (sometimes watchdog triggers
             # the created event twice for the same file. This should be a bug
             # and we need to work around it by storing the last created file)
-            event.src_path != self.last_created
+            event.dest_path != self.last_created
         ):
             time.sleep(1)  # Wait for the file to be completely written
-            logger.info(f'New hdf5: {event.src_path}')
-            self.last_created = event.src_path  # Update the last created file
-            # In case we set the batch more than 10 seconds (i.e. wait for more
-            # than one file to be created before running dasly), we need to
-            # count the number of events and run dasly only when the event
+            logger.info(f'New hdf5: {event.dest_path}')
+            self.last_created = event.dest_path  # Update the last created
+            # In case we set the batch more than 10 seconds (i.e. wait for
+            # more than one file to be created before running dasly), we need
+            # to count the number of events and run dasly only when the event
             # count reaches the threshold
             self.event_count += 1
             if self.event_count >= self.event_thresh:
                 logger.info('Runing dasly...')
-                run_dasly(event.src_path)
+                run_dasly(event.dest_path)
                 self.event_count = 0  # Reset the event count
 
 
