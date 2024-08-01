@@ -375,14 +375,12 @@ class DASAnalyzer:
 
         # Assign an arbitrary number (max int32) to y values outside the range
         # should not be NAN because DBSCAN cannot handle NAN
-        # Create a 2D array of column indices
-        col_idx = np.arange(y_vals.shape[1])
-        # Create the mask using broadcasting
         left_lim = np.min([x1, x2], axis=0)
         right_lim = np.max([x1, x2], axis=0)
+        # Create the mask using broadcasting
         mask = (
-            (col_idx >= left_lim[:, np.newaxis]) &
-            (col_idx <= right_lim[:, np.newaxis]))
+            (x_coords >= left_lim[:, np.newaxis]) &
+            (x_coords <= right_lim[:, np.newaxis]))
         # Apply the mask to replace values outside the limits with the number
         y_vals_mask = np.where(mask, y_vals, np.iinfo(np.int32).max)
         y_vals_mask[np.isnan(y_vals_mask)] = np.iinfo(np.int32).max
@@ -423,14 +421,12 @@ class DASAnalyzer:
 
         # Assign an arbitrary number (max int32) to y values outside the range
         # should not be NAN because DBSCAN cannot handle NAN
-        # Create a 2D array of column indices
-        row_idx = np.arange(x_vals.shape[0]).reshape(-1, 1)
-        # Create the mask using broadcasting
         bottom_lim = np.min([y1, y2], axis=0)
         top_lim = np.max([y1, y2], axis=0)
+        # Create the mask using broadcasting
         mask = (
-            (y_coords_reshaped >= bottom_lim[row_idx]) &
-            (y_coords_reshaped <= top_lim[row_idx]))
+            (y_coords >= bottom_lim[:, np.newaxis]) &
+            (y_coords <= top_lim[:, np.newaxis]))
         # Apply the mask to replace values outside the limits with the number
         x_vals_mask = np.where(mask, x_vals, np.iinfo(np.int32).max)
         x_vals_mask[np.isnan(x_vals_mask)] = np.iinfo(np.int32).max

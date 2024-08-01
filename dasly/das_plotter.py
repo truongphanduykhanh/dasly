@@ -61,11 +61,13 @@ class DASPlotter:
         data: Union[pd.DataFrame, np.ndarray] = None,
         vmin: float = None,
         vmax: float = None,
+        percentile: float = 0.95,
         aspect: float = None,
         xlabel: str = 'Space',
         ylabel: str = 'Time',
         xticks_rotate: float = 0,
-        yticks_rotate: float = 0
+        yticks_rotate: float = 0,
+        colorbar: bool = True
     ) -> None:
         """Plot heatmap.
 
@@ -76,12 +78,16 @@ class DASPlotter:
                 If None, automatically choose suitable value. Defaults to None.
             vmax (Union[float, str], optional): Values to anchor the colormap.
                 If None, automatically choose suitable value. Defaults to None.
+            percentile (float, optional): Percentile value to choose vmax.
+                Defaults to 0.95.
             xlabel (str, optional): Label for x-axis. Defaults to 'Space'.
             ylabel (str, optional): Label for y-axis. Defaults to 'Time'.
             xticks_rotate (float, optional): Rotation of x-axis labels.
                 Defaults to 0.
             yticks_rotate (float, optional): Rotation of y-axis labels.
                 Defaults to 0.
+            colorbar (bool, optional): Whether to add colorbar. Defaults to
+                True
         """
         # Data input
         #######################################################################
@@ -109,15 +115,15 @@ class DASPlotter:
             cmap = 'viridis'
             vmin = 0
             if vmax is None:
-                percentile = np.quantile(data, 0.95)
-                vmax = percentile
+                percentile_value = np.quantile(data, percentile)
+                vmax = percentile_value
             logger.info(f'vmax: {vmax:.3g}')
         else:
             cmap = 'RdBu'
             if (vmin is None) or (vmax is None):
-                percentile = np.quantile(np.abs(data), 0.95)
-                vmin = - percentile
-                vmax = percentile
+                percentile_value = np.quantile(np.abs(data), percentile)
+                vmin = - percentile_value
+                vmax = percentile_value
                 logger.info(f'vmin: {vmin:.3g}, vmax: {vmax:.3g}')
         norm = colors.TwoSlopeNorm(
             vmin=vmin,
@@ -162,6 +168,9 @@ class DASPlotter:
         #######################################################################
         plt.xlabel(xlabel)
         plt.ylabel(ylabel)
+
+        if not colorbar:
+            return
 
         # Add colorbar
         #######################################################################

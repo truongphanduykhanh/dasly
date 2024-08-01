@@ -260,7 +260,8 @@ class DASLoader:
         fmt: str = '%Y%m%d %H%M%S',
         suppress_date: bool = False,
         chIndex: Union[slice, list[int], np.ndarray] = None,
-        integrate: bool = True
+        integrate: bool = True,
+        reset_channel_idx: bool = True
     ) -> None:
         """Load data to the instance.
 
@@ -294,6 +295,9 @@ class DASLoader:
             integrate (bool, optional): If True, integrate the data to get
                 strain unit. Otherwise, the data is in strain rate unit. See
                 more at simpleDASreader. Defaults to True
+            reset_channel_idx (bool, optional): If True, reset the column names
+                of the data. This is necessary when chIndex is used to remove
+                redundant channels. Defaults to True.
         """
         slicing = False  # not slicing the data later if file_paths is given
         if not file_paths:  # if file_paths is not given
@@ -324,6 +328,10 @@ class DASLoader:
             userSensitivity=None  # default
         )
         signal = pd.DataFrame(signal)
+        # reset column names. this is necessary when chIndex is used to remove
+        # redundant channels
+        if reset_channel_idx:
+            signal.columns = range(signal.shape[1])
         # Slice the data
         if slicing and start_exact_second:
             signal = signal.loc[start:end]  # extact only the range start-end

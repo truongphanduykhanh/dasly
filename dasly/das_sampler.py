@@ -108,8 +108,8 @@ class DASSampler:
             self._update_t_rate()  # in das_loader.py
             self._update_s_rate()  # in das_loader.py
             logger.info('Signal updated with new temporal sampling rate '
-                        + f'{self.t_rate:.0g} and new spatial sampling rate '
-                        + f'{self.s_rate:.3g}.')
+                        + f'{self.t_rate:.0f} and new spatial sampling rate '
+                        + f'{self.s_rate:.3f}.')
             return None
         else:
             return signal_sample
@@ -237,7 +237,7 @@ class DASSampler:
             self.signal = signal_decimate
             self._update_t_rate()  # in das_loader.py
             logger.info('Signal updated with new temporal sampling rate '
-                        + f'{self.t_rate:.0g}.')
+                        + f'{self.t_rate:.0f}.')
             return None
         else:
             return signal_decimate

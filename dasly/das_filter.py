@@ -11,6 +11,13 @@ import pandas as pd
 from scipy.signal import butter, sosfilt
 from scipy.ndimage import convolve
 import cv2
+import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib.ticker import ScalarFormatter
+
+from dasly.das_analyzer import DASAnalyzer
+
+sns.set_theme()
 
 # Set up logger
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -404,6 +411,8 @@ class DASFilter:
             eigvec=[1, np.tan(theta)],
             eigval_prop=1 / np.tan(theta1 - theta)
         )
+        self.cov_mat = cov_mat
+
         gauss_kernel = DASFilter._create_gauss_kernel(
             cov_mat=cov_mat,
             s_rate=self.s_rate,
@@ -490,3 +499,166 @@ class DASFilter:
             return None
         else:
             return signal_sobel
+
+    def fft(
+        self,
+        data: np.ndarray = None,
+        agg_func: callable = np.mean,
+        flim: tuple = None,  # (low, high) inclusive
+        plot: bool = True,
+        power_lim: Tuple[int, int] = (-1, 1),
+        ylim: Tuple[float, float] = None
+    ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """Compute the Fast Fourier Transform (FFT) of the signal.
+
+        Args:
+            data (np.ndarray, optional): Data to compute the FFT. If None, the
+                signal attribute is used. Defaults to None.
+            agg_func (callable, optional): Aggregation function to apply to the
+                FFT results. Defaults to np.mean.
+            flim (tuple, optional): Frequency limits to filter the results.
+            plot (bool, optional): If True, plot the FFT results. If False,
+                return the frequencies and aggregated spectrum. Defaults to
+                True.
+            power_lim (Tuple[int, int], optional): Threshold for scientific
+                notation. Defaults to (-1, 1).
+            ylim (Tuple[float, float], optional): Y-axis limits for the plot.
+                Defaults to None.
+
+        Returns:
+            Union[None, Tuple[np.ndarray, np.ndarray]]: Returns None if plot is
+                True. Otherwise, returns the frequencies and aggregated
+                spectrum as a tuple.
+        """
+        if data is None:
+            data = self.signal.to_numpy()
+        # Compute the FFT for each time series (each column) across all rows
+        fft_results = np.fft.fft(data, axis=0)
+        # Compute the magnitude of the FFT results
+        fft_magnitudes = np.abs(fft_results)
+        # Aggregate the magnitudes across space indices
+        agg_spectrum = agg_func(fft_magnitudes, axis=1)
+        # Calculate frequency axis
+        n_samples = data.shape[0]
+        frequencies = np.fft.fftfreq(n_samples, d=1/self.t_rate)
+
+        # Only keep the positive half of the spectrum
+        agg_spectrum = agg_spectrum[:n_samples//2]
+        frequencies = frequencies[:n_samples//2]
+
+        if flim:
+            mask = (frequencies >= flim[0]) & (frequencies <= flim[1])
+            agg_spectrum = agg_spectrum[mask]
+            frequencies = frequencies[mask]
+
+        if not plot:  # Return the frequencies and aggregated spectrum
+            return frequencies, agg_spectrum  # end function
+
+        # Plot the FFT results
+        fig, ax = plt.subplots()
+        ax.plot(frequencies, agg_spectrum)
+        ax.set_xlabel('Frequency (Hz)')
+        ax.set_ylabel('Magnitude')
+        if ylim:
+            ax.set_ylim(ylim[0], ylim[1])
+
+        # Setting y-axis to scientific notation
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_scientific(True)
+        formatter.set_powerlimits(power_lim)  # Set the threshold for notation
+        ax.yaxis.set_major_formatter(formatter)
+
+    def fft_windows(
+        self,
+        line: np.ndarray,
+        t: int,
+        data: np.ndarray = None,
+        agg_func: callable = np.mean,
+        flim: tuple = None,  # (low, high) inclusive
+        plot: bool = True,
+        power_lim: Tuple[int, int] = (-1, 1),
+        ylim: Tuple[float, float] = None
+    ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """Compute the windows FFT for of the signal.
+
+        Args:
+            line (np.ndarray): Line to extract the section.
+            t (int): Half-width of the section from the row index.
+            data (np.ndarray, optional): Data to compute the FFT. If None, the
+                signal attribute is used. Defaults to None.
+            agg_func (callable, optional): Aggregation function to apply to the
+                FFT results. Defaults to np.mean.
+            flim (tuple, optional): Frequency limits.
+            plot (bool, optional): If True, plot the FFT results. If False,
+                return the frequencies and aggregated spectrum. Defaults to
+                True.
+            power_lim (Tuple[int, int], optional): Threshold for scientific
+                notation. Defaults to (-1, 1).
+            ylim (Tuple[float, float], optional): Y-axis limits for the plot.
+                Defaults to None.
+
+        Returns:
+            Union[None, Tuple[np.ndarray, np.ndarray]]: Returns None if plot is
+                True. Otherwise, returns the frequencies and aggregated
+                spectrum as a tuple.
+        """
+        if data is None:
+            data = self.signal.to_numpy()
+
+        line_rehsaped = line.reshape(1, 4)
+        y_vals = DASAnalyzer._y_vals_lines(
+            lines=line_rehsaped,
+            x_coords=np.arange(line[0], line[2] + 1)
+        )
+        y_vals = np.round(y_vals).astype(int)
+        y_vals = y_vals.reshape(-1)
+
+        def extract_section(
+            data: np.ndarray,  # shape (m, n)
+            col_idx: np.ndarray,  # shape (n ,)
+            row_idx: np.ndarray,  # shape (n ,)
+            t: int
+        ) -> np.ndarray:
+            """Extract a section of the data.
+
+            Args:
+                data (np.ndarray): 2D data array.
+                col_idx (np.ndarray): Column indices to extract.
+                row_idx (np.ndarray): Corresponding row indices to extract.
+                t (int): Half-width of the section from the row index.
+
+            Returns:
+                np.ndarray: Extracted section of the data.
+            """
+            # Generate the row index ranges
+            row_range = np.arange(-t, t + 1)
+            row_indices_expanded = row_idx[:, None] + row_range
+
+            # Clip the indices to ensure they are within the valid range
+            row_indices_expanded = np.clip(
+                row_indices_expanded, 0, data.shape[0] - 1)
+
+            # Use advanced indexing to extract the data
+            result = data[row_indices_expanded, col_idx[:, None]]
+
+            # Transpose the result to get the desired shape (2*t + 1, m)
+            result = result.T
+            return result
+
+        # Extract the section of the signal
+        section = extract_section(
+            data=data,
+            col_idx=np.arange(line[0], line[2] + 1),
+            row_idx=y_vals,
+            t=t
+        )
+
+        # Compute the FFT for the extracted section
+        self.fft(
+            data=section,
+            agg_func=agg_func,
+            flim=flim,
+            plot=plot,
+            power_lim=power_lim,
+            ylim=ylim
+        )
