@@ -1,6 +1,6 @@
 # input_dir should contain the following structure: /YYYYMMDD/dphi/HHMMSS.hdf5
-input_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/test_input
-# input_dir: /raid1/fsi/exps/Aasfjordbrua_from_20240508
+# input_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/test_input
+input_dir: /raid1/fsi/exps/Aastfjordbrua_from_20240508
 start_exact_second: False  # for deployment, set to False
 integrate: False  # do not integrate the data (strain rate unit)
 
