@@ -121,11 +121,6 @@ def get_file_paths(
 
     # Get hdf5 files paths given the time constraints
     ###########################################################################
-    print('simpleDASreader.find_DAS_files...................................')
-    print(f'folder_path: {folder_path}, {type(folder_path)}')
-    print(f'start: {start}, {type(start)}')
-    print(f'duration: {duration}, {type(duration)}')
-    print('simpleDASreader.find_DAS_files...................................')
     file_paths, _, _ = simpleDASreader.find_DAS_files(
         experiment_path=folder_path,
         start=start,
@@ -315,17 +310,12 @@ class DASLoader:
                 fmt=fmt
             )
             # Get file paths
-            print('get_file_paths...................................')
-            print(f'start: {start}, {type(start)}')
-            print(f'duration: {duration}, {type(duration)}')
-            print(f'end: {end}, {type(end)}')
             file_paths = get_file_paths(
                 folder_path=folder_path,
                 start=start,
                 duration=duration,
                 start_exact_second=start_exact_second
             )
-            print('get_file_paths...................................')
         # Load data
         signal = simpleDASreader.load_DAS_files(
             filepaths=file_paths,
