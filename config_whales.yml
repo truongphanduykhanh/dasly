@@ -1,14 +1,15 @@
 # input_dir should contain the following structure: /YYYYMMDD/dphi/HHMMSS.hdf5
 input_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/test_input
+# input_dir: /raid1/fsi/exps/
 start_exact_second: False  # for deployment, set to False
 integrate: True  # integrate the data (strain unit)
 
 database:
   database_type: postgresql
   dbapi: psycopg2
-  endpoint: 129.241.154.236
+  endpoint: cgf-postgresql.postgres.database.azure.com
   port: 5432
-  database: svalbard
+  database: aastfjordbrua
   database_table: whales
 
 hdf5_file_length: 10  # length of each hdf5 file, in seconds (this is fixed)
@@ -31,11 +32,11 @@ gaussian_smooth:
   std_s: 500
   unit: 'm/s'
 
-binary_threshold: 2.1e-11
+binary_threshold: 2.5e-11
 
 hough_transform:
-    speed_res: 10
-    length_meters: 4000
+    speed_res: 100
+    length_meters: 3500
     threshold_percent: 0.8
     max_line_gap_percent: 0.1
     speed_unit: 'm/s'
