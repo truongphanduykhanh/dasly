@@ -237,7 +237,7 @@ def run_dasly(file_path: str) -> None:
         duration=batch,
         start_exact_second=start_exact_second,
         integrate=integrate,
-        chIndex=np.arange(round(5000 * s_rate), round(90000 * s_rate)),
+        chIndex=np.arange(round(5000 * s_rate), round(85000 * s_rate)),
         reset_channel_idx=False
     )
 
