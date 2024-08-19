@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import yaml
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.pool import NullPool
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -140,7 +141,7 @@ def read_sql(query: str) -> pd.DataFrame:
     # Create the connection string
     connection_string = create_connection_string()
     # Create an engine
-    engine = create_engine(connection_string)
+    engine = create_engine(connection_string, poolclass=NullPool)
     # Execute a SQL query
     df = pd.read_sql(query, engine)
     return df
@@ -155,7 +156,7 @@ def write_sql(
     # Create the connection string
     connection_string = create_connection_string()
     # Create an engine
-    engine = create_engine(connection_string)
+    engine = create_engine(connection_string, poolclass=NullPool)
     # Execute a SQL query
     if batch_id:
         df.insert(0, 'batch_id', batch_id)
@@ -168,7 +169,7 @@ def check_table_exists(table_name: str) -> bool:
     """Check if the table exists in the database.
     """
     connection_string = create_connection_string()
-    engine = create_engine(connection_string)
+    engine = create_engine(connection_string, poolclass=NullPool)
     inspector = inspect(engine)
     return inspector.has_table(table_name)
 
