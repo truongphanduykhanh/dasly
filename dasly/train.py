@@ -12,6 +12,8 @@ import pandas as pd
 import yaml
 
 from dasly.master import Dasly
+from dasly.utils import assign_id
+
 
 # Set up logger
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -154,7 +156,7 @@ def run_dasly(
     return lines_df
 
 
-def assign_id(
+def assign_id_df(
     lines: pd.DataFrame,
     previous_lines: pd.DataFrame,
     id_col: str = 'line_id',
@@ -189,4 +191,22 @@ def assign_id(
     Returns:
         pd.DataFrame: new column id_col is added to the lines data frame.
     """
+
     pass
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

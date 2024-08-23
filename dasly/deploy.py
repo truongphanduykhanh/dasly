@@ -19,6 +19,8 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 from dasly.master import Dasly
+from dasly import utils
+
 
 # Set up logger
 logging.basicConfig(level=logging.INFO, format='%(message)s')
