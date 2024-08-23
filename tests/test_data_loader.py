@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime
-from dasly.das_loader import Loader
+from dasly.loader import Loader
 
 
 class TestDasly(unittest.TestCase):
