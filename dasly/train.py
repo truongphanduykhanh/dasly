@@ -191,8 +191,12 @@ def assign_id_df(
     Returns:
         pd.DataFrame: new column id_col is added to the lines data frame.
     """
-
-    pass
+    lines_coords = lines[[s1_col, t1_col, s2_col, t2_col]].to_numpy()
+    previous_lines_coords = (
+        previous_lines[[s1_col, t1_col, s2_col, t2_col]].to_numpy())
+    
+    # calculate the distance between each line and the previous lines
+    
 
 
 
