@@ -202,37 +202,7 @@ def reassign_id(
     return lines_id_resigned
 
 
-def interpolate_timestamps(
-    s1: int,
-    t1: Union[pd.Timestamp, datetime],
-    s2: int,
-    t2: Union[pd.Timestamp, datetime],
-) -> np.ndarray[np.datetime64]:
-    """Get the timestamps for a segment of a line segment defined by (s1, t1)
-    and (s2, t2).
-
-    Args:
-        s1 (int): Start index of the line segment.
-        t1 (Union[pd.Timestamp, datetime]): Start timestamp of the line seg.
-        s2 (int): End index of the line segment.
-        t2 (Union[pd.Timestamp, datetime]): End timestamp of the line segment.
-
-    Returns:
-        np.ndarray[np.datetime64]: Timestamps for the line segment between s1
-            and s2.
-    """
-    # Calculate the number of space indices
-    num_space_indices = np.abs(s2 - s1) + 1
-
-    # Create an array of timestamps linearly spaced from t11 to t12
-    timestamps = pd.date_range(start=t1, end=t2, periods=num_space_indices)
-
-    return timestamps.to_numpy()
-
-
-def calculate_speed(
-    lines: np.ndarray[Union[float, pd.Timestamp, datetime]]
-) -> Union[float, np.ndarray[float]]:
+def calculate_speed(lines: np.ndarray) -> Union[float, np.ndarray[float]]:
     """Calculate the speed of line segments defined by (s1, t1, s2, t2). This
     is for spatio-temporal data where the x-axis is space and the y-axis
     is time.
@@ -241,10 +211,10 @@ def calculate_speed(
         lines (np.ndarray[Union[float, pd.Timestamp, datetime]]): Array of line
             segments. Shape (N, 4) where N is the number of line segments, or
             (4,) for a single line. Each line segment is defined by:
-            - s1 (float): Start index of the line segment.
-            - t1 (Union[float, pd.Timestamp, datetime]): Start timestamp.
-            - s2 (float): End index of the line segment.
-            - t2 (Union[float, pd.Timestamp, datetime]): End timestamp.
+            - s1 (Union[int, float]): Start index of the line segment.
+            - t1 (Union[int, float, pd.Timestamp, datetime]): Start timestamp.
+            - s2 (Union[int, float]): End index of the line segment.
+            - t2 (Union[int, float, pd.Timestamp, datetime]): End timestamp.
 
     Returns:
         Union[float, np.ndarray[float]]: If the input is a single segment,
@@ -252,10 +222,13 @@ def calculate_speed(
             array of slopes.
     """
     single_line = False
-    # If input is a single line segment with shape (4,)
-    if lines.ndim == 1 and lines.shape[0] == 4:
-        lines = lines.reshape(1, 4)
+    # If input is a single line segment, reshape it to (1, 4)
+    if lines.ndim == 1:
+        lines = np.atleast_2d(lines)
         single_line = True
+
+    # Convert timestamps to numeric values
+    lines = convert_to_numeric(lines)  # Shape (N, 4)
 
     # Extracting s1, t1, s2, t2
     s1 = lines[:, 0]
@@ -264,12 +237,10 @@ def calculate_speed(
     t2 = lines[:, 3]
 
     # Calculate the time difference between t2 and t1
-    time_diff = (t2 - t1)
-    if isinstance(time_diff[0], timedelta):
-        time_diff = time_diff.astype('timedelta64[s]').astype(float)
+    time_diff = (t2 - t1).astype(float)
 
     # Calculate the space difference between s2 and s1
-    space_diff = s2 - s1
+    space_diff = (s2 - s1).astype(float)
 
     # Calculate the speed of the line segment
     speed = np.divide(
@@ -278,10 +249,12 @@ def calculate_speed(
         where=time_diff != 0,
         out=np.full_like(space_diff, np.inf)
     )
+
+    # If it was a single line segment, return a float
     if single_line:
         return speed[0]
 
-    return speed.astype(float)
+    return speed
 
 
 def calculate_slope(
@@ -295,10 +268,10 @@ def calculate_slope(
         lines (np.ndarray[Union[float, pd.Timestamp, datetime]]): Array of line
             segments. Shape (N, 4) where N is the number of line segments, or
             (4,) for a single line. Each line segment is defined by:
-            - s1 (float): Start index of the line segment.
-            - t1 (Union[float, pd.Timestamp, datetime]): Start timestamp.
-            - s2 (float): End index of the line segment.
-            - t2 (Union[float, pd.Timestamp, datetime]): End timestamp.
+            - s1 (Union[int, float]): Start index of the line segment.
+            - t1 (Union[int, float, pd.Timestamp, datetime]): Start timestamp.
+            - s2 (Union[int, float]): End index of the line segment.
+            - t2 (Union[int, float, pd.Timestamp, datetime]): End timestamp.
 
     Returns:
         Union[float, np.ndarray[float]]: If the input is a single segment,
@@ -324,28 +297,32 @@ def reorder_coordinates(
         lines (np.ndarray[Union[float, pd.Timestamp, datetime]]): Array of line
             segments. Shape (N, 4) where N is the number of line segments, or
             (4,) for a single line. Each line segment is defined by:
-            - s1 (float): Start index of the line segment.
-            - t1 (Union[float, pd.Timestamp, datetime]): Start timestamp.
-            - s2 (float): End index of the line segment.
-            - t2 (Union[float, pd.Timestamp, datetime]): End timestamp.
+            - s1 (Union[int, float]): Start index of the line segment.
+            - t1 (Union[int, float, pd.Timestamp, datetime]): Start timestamp.
+            - s2 (Union[int, float]): End index of the line segment.
+            - t2 (Union[int, float, pd.Timestamp, datetime]): End timestamp.
 
     Returns:
         np.ndarray[Union[float, pd.Timestamp, datetime]]: Reordered array of
             line segments.
     """
-    lines_cp = lines.copy()
+    # Create a copy of the original array to avoid modifying it
+    lines_copy = lines.copy()
 
-    # If input is a 1D array of shape (4,), reshape it to (1, 4)
+    # If input is 1D array of shape (4,), reshape it to (1, 4)
     single_line = False
-    if lines.ndim == 1 and lines.shape[0] == 4:
-        lines_cp = lines_cp.reshape(1, 4)
+    if lines.ndim == 1:
+        lines = np.atleast_2d(lines)
         single_line = True
 
+    # Convert timestamps to numeric values
+    lines = convert_to_numeric(lines)  # Shape (N, 4)
+
     # Extract the coordinates
-    x1 = lines_cp[:, 0]
-    y1 = lines_cp[:, 1]
-    x2 = lines_cp[:, 2]
-    y2 = lines_cp[:, 3]
+    x1 = lines_copy[:, 0]
+    y1 = lines_copy[:, 1]
+    x2 = lines_copy[:, 2]
+    y2 = lines_copy[:, 3]
 
     # Create a mask where y1 > y2
     mask_y = y1 > y2
@@ -362,42 +339,45 @@ def reorder_coordinates(
     y1[mask_x], y2[mask_x] = y2[mask_x], y1[mask_x]
 
     # Combine the coordinates back into the lines array
-    lines_cp = np.stack((x1, y1, x2, y2), axis=1)
+    lines_copy = np.stack((x1, y1, x2, y2), axis=1)
 
     # If it was a single line segment, reshape the output back to (4,)
     if single_line:
-        return lines_cp.reshape(4,)
+        return lines_copy.reshape(4,)
 
-    return lines_cp
+    return lines_copy
 
 
-def intersect_space(
+def overlap_space_idx(
     lines1: np.ndarray,  # Shape (N, 4) or (4,)
     lines2: np.ndarray   # Shape (M, 4) or (4,)
 ) -> np.ndarray:
-    """Calculate the space intersection limits of line segments.
+    """Calculate the space overlaping indices limits of line segments.
 
     Args:
         lines1 (np.ndarray): Line segments 1. Shape (N, 4) or (4,), where each
             row is defined by:
-            - s1 (float): Start index of the line segment.
-            - t1 (Union[float, pd.Timestamp, datetime]): Start timestamp.
-            - s2 (float): End index of the line segment.
-            - t2 (Union[float, pd.Timestamp, datetime]): End timestamp.
+            - s1 (Union[int, float]): Start index of the line segment.
+            - t1 (Union[int, float, pd.Timestamp, datetime]): Start timestamp.
+            - s2 (Union[int, float]): End index of the line segment.
+            - t2 (Union[int, float, pd.Timestamp, datetime]): End timestamp.
         lines2 (np.ndarray): Line segments 2. Shape (M, 4) or (4,), where each
             row is defined by:
-            - s1 (float): Start index of the line segment.
-            - t1 (Union[float, pd.Timestamp, datetime]): Start timestamp.
-            - s2 (float): End index of the line segment.
-            - t2 (Union[float, pd.Timestamp, datetime]): End timestamp.
+            - s1 (Union[int, float]): Start index of the line segment.
+            - t1 (Union[int, float, pd.Timestamp, datetime]): Start timestamp.
+            - s2 (Union[int, float]): End index of the line segment.
+            - t2 (Union[int, float, pd.Timestamp, datetime]): End timestamp.
 
     Returns:
-        np.ndarray: Space intersection limits. Shape (N, M, 2) or (2,) if input
-            shapes were (4,).
+        np.ndarray: Space overlaping indices limits. Shape (N, M, 2) or (2,) if
+            input shapes were (4,).
     """
-    # Ensure line1 and line2 are at least 2D (shape (N, 4) and (M, 4))
-    lines1 = np.atleast_2d(lines1)
-    lines2 = np.atleast_2d(lines2)
+    # If inputs are 1D arrays of shape (4,), reshape them to (1, 4)
+    single_lines = False
+    if lines1.ndim == 1 and lines2.ndim == 1:
+        lines1 = np.atleast_2d(lines1)
+        lines2 = np.atleast_2d(lines2)
+        single_lines = True
 
     # Extract the relevant parts of the line segments
     s11, s12 = lines1[:, 0], lines1[:, 2]
@@ -419,116 +399,133 @@ def intersect_space(
     lim1 = np.maximum(range1_min, range2_min)  # Shape (N, M)
     lim2 = np.minimum(range1_max, range2_max)  # Shape (N, M)
 
-    # Stack the results along the last dimension to get the final shape (N, M, 2)
+    # Stack the results along the last dimension to get shape (N, M, 2)
     result = np.stack([lim1, lim2], axis=-1)  # Shape (N, M, 2)
 
     # If original inputs were 1D, return a 1D result
-    if lines1.shape[0] == 1 and lines2.shape[0] == 1:
+    if single_lines:
         result = result.squeeze(axis=(0, 1))  # Shape (2,)
 
-    return result
+    return result.astype(float)
 
 
-# def calculate_distance(
-#     lines1: np.ndarray,  # Shape (N, 4) or (4,)
-#     lines2: np.ndarray   # Shape (M, 4) or (4,)
-# ) -> np.ndarray:
-#     """Calculate time gap among line segments.
-
-#     Args:
-#         lines1 (np.ndarray): Line segments 1. Shape (N, 4) or (4,), where each
-#             row is defined by:
-#             - s1 (float): Start index of the line segment.
-#             - t1 (Union[float, pd.Timestamp, datetime]): Start timestamp.
-#             - s2 (float): End index of the line segment.
-#             - t2 (Union[float, pd.Timestamp, datetime]): End timestamp.
-#         lines2 (np.ndarray): Line segments 2. Shape (M, 4) or (4,), where each
-#             row is defined by:
-#             - s1 (float): Start index of the line segment.
-#             - t1 (Union[float, pd.Timestamp, datetime]): Start timestamp.
-#             - s2 (float): End index of the line segment.
-#             - t2 (Union[float, pd.Timestamp, datetime]): End timestamp.
-
-#     Returns:
-#         np.ndarray: Time gap between line segments. Shape (N, M).
-#     """
-#     space_intersection = intersect_space(lines1, lines2)
-#     if len(space_intersection) == 0:
-#         return float('inf')
-
-#     slope1 = calculate_slope(lines1)
-#     slope2 = calculate_slope(lines2)
-
-#     s11, t11, _s12, _t12 = lines1
-#     s21, t21, _s22, _t22 = lines2
-
-#     t1_interp = (
-#         t11 + pd.to_timedelta((space_intersection - s11) * slope1, unit='s'))
-#     t2_interp = (
-#         t21 + pd.to_timedelta((space_intersection - s21) * slope2, unit='s'))
-
-#     time_diff = (t1_interp - t2_interp).total_seconds()
-#     avg_abs_time_diff = np.mean(np.abs(time_diff))
-
-#     return avg_abs_time_diff
-
-
-def calculate_distance(
+def calculate_line_gap(
     lines1: np.ndarray,  # Shape (N, 4) or (4,)
     lines2: np.ndarray   # Shape (M, 4) or (4,)
-) -> np.ndarray:
-    """Calculate time gap among line segments.
+) -> Union[float, np.ndarray[float]]:
+    """Calculate the average time gap between line segments.
 
     Args:
         lines1 (np.ndarray): Line segments 1. Shape (N, 4) or (4,), where each
             row is defined by:
-            - s1 (float): Start index of the line segment.
-            - t1 (Union[float, pd.Timestamp, datetime]): Start timestamp.
-            - s2 (float): End index of the line segment.
-            - t2 (Union[float, pd.Timestamp, datetime]): End timestamp.
+            - s1 (Union[int, float]): Start index of the line segment.
+            - t1 (Union[int, float, pd.Timestamp, datetime]): Start timestamp.
+            - s2 (Union[int, float]): End index of the line segment.
+            - t2 (Union[int, float, pd.Timestamp, datetime]): End timestamp.
         lines2 (np.ndarray): Line segments 2. Shape (M, 4) or (4,), where each
             row is defined by:
-            - s1 (float): Start index of the line segment.
-            - t1 (Union[float, pd.Timestamp, datetime]): Start timestamp.
-            - s2 (float): End index of the line segment.
-            - t2 (Union[float, pd.Timestamp, datetime]): End timestamp.
+            - s1 (Union[int, float]): Start index of the line segment.
+            - t1 (Union[int, float, pd.Timestamp, datetime]): Start timestamp.
+            - s2 (Union[int, float]): End index of the line segment.
+            - t2 (Union[int, float, pd.Timestamp, datetime]): End timestamp.
 
     Returns:
-        np.ndarray: Time gap between line segments. Shape (N, M).
+        Union[float, np.ndarray[float]]: If the input is a single segment,
+            returns a float. If the input is an array of segments, returns an
+            array of average time gaps.
     """
-    # Ensure lines1 and lines2 are at least 2D (shape (N, 4) and (M, 4))
-    lines1 = np.atleast_2d(lines1)
-    lines2 = np.atleast_2d(lines2)
+    # If inputs are 1D arrays of shape (4,), reshape them to (1, 4)
+    single_lines = False
+    if lines1.ndim == 1 and lines2.ndim == 1:
+        lines1 = np.atleast_2d(lines1)  # Shape (1, 4)
+        lines2 = np.atleast_2d(lines2)  # Shape (1, 4)
+        single_lines = True
 
-    # Calculate the space intersection limits for each pair of lines
-    space_intersection = intersect_space(lines1, lines2)
+    # Convert timestamps to numeric values
+    lines1 = convert_to_numeric(lines1)  # Shape (N, 4)
+    lines2 = convert_to_numeric(lines2)  # Shape (M, 4)
 
-    if len(space_intersection) == 0:
-        return np.full((lines1.shape[0], lines2.shape[0]), np.inf)
+    # Calculate slopes m for each line segment (N, )
+    slope1 = calculate_slope(lines1)  # Shape (N, )
+    slope2 = calculate_slope(lines2)  # Shape (M, )
 
-    # Calculate the slope for each line segment
-    slope1 = calculate_slope(lines1)[:, np.newaxis]  # Shape (N, 1)
-    slope2 = calculate_slope(lines2)[np.newaxis, :]  # Shape (1, M)
+    # Calculate the overlapping space indices limits
+    overlap_lim = overlap_space_idx(lines1, lines2)  # Shape (N, M, 2)
 
-    # Extract the start points and times
-    s11, t11 = lines1[:, 0][:, np.newaxis], lines1[:, 1][:, np.newaxis]
-    s21, t21 = lines2[:, 0][np.newaxis, :], lines2[:, 1][np.newaxis, :]
+    # Extract coordinates for lines1
+    x1_1 = lines1[:, 0].reshape(-1, 1, 1)  # Shape (N, 1, 1)
+    y1_1 = lines1[:, 1].reshape(-1, 1, 1)  # Shape (N, 1, 1)
 
-    # Calculate interpolated times at the intersection points
-    if isinstance(t11.flat[0], (pd.Timestamp, datetime)):
-        # Convert the time difference to timedelta
-        t1_interp = t11 + pd.to_timedelta((space_intersection[..., 0] - s11) * slope1, unit='s')
-        t2_interp = t21 + pd.to_timedelta((space_intersection[..., 0] - s21) * slope2, unit='s')
-    else:
-        t1_interp = t11 + (space_intersection[..., 0] - s11) * slope1
-        t2_interp = t21 + (space_intersection[..., 0] - s21) * slope2
+    # Extract coordinates for lines2
+    x1_2 = lines2[:, 0].reshape(1, -1, 1)  # Shape (1, M, 1)
+    y1_2 = lines2[:, 1].reshape(1, -1, 1)  # Shape (1, M, 1)
 
-    # Calculate the absolute time differences
-    time_diff = np.abs(t1_interp - t2_interp)
-    
-    if isinstance(t11.flat[0], (pd.Timestamp, datetime)):
-        time_diff = time_diff.total_seconds()  # Convert to seconds if needed
+    # Calculate the y values for each line segment at the overlapping space idx
+    with np.errstate(invalid='ignore'):  # Ignore division by zero
+        # Calculate y values for lines1 at each x position
+        y_values_line1 = (  # Shape (N, M, L)
+            slope1[:, np.newaxis, np.newaxis] * (overlap_lim - x1_1) + y1_1)
+        y_values_line2 = (  # Shape (N, M, L)
+            slope2[np.newaxis, :, np.newaxis] * (overlap_lim - x1_2) + y1_2)
 
-    avg_abs_time_diff = np.mean(time_diff, axis=-1)  # Shape (N, M)
+    # Compute the absolute difference
+    abs_diff = np.abs(y_values_line1 - y_values_line2)  # Shape (N, M, L)
 
-    return avg_abs_time_diff
+    # Compute the average along the L dimension
+    avg_abs_diff = np.mean(abs_diff, axis=-1)  # Shape (N, M)
+
+    # Check the invalid_lim for overlap_lim and update the avg_abs_diff
+    # This means 2 line segments do not overlap in space
+    invalid_lim = overlap_lim[:, :, 0] > overlap_lim[:, :, -1]
+    avg_abs_diff[invalid_lim] = np.inf
+
+    # If original inputs were 1D, return a float
+    if single_lines:
+        return avg_abs_diff[0, 0]
+
+    return avg_abs_diff
+
+
+def convert_to_numeric(lines: np.ndarray) -> np.ndarray:
+    """Convert the timestamps in the line segments to numeric values.
+
+    Args:
+        lines (np.ndarray): Array of line segments. Shape (N, 4) where N is the
+            number of line segments. Each line segment is defined by:
+            - s1 (Union[int, float]): Start index of the line segment.
+            - t1 (Union[int, float, pd.Timestamp, datetime]): Start timestamp.
+            - s2 (Union[int, float]): End index of the line segment.
+            - t2 (Union[int, float, pd.Timestamp, datetime]): End timestamp.
+
+    Returns:
+        np.ndarray: Line segments with timestamps converted.
+    """
+    # Create a copy of the original array to avoid modifying it
+    lines_copy = lines.copy()
+    for i in range(lines_copy.shape[1]):
+        if isinstance(lines_copy[:, i][0], (pd.Timestamp, datetime)):
+            lines_copy[:, i] = (
+                lines_copy[:, i].astype('datetime64[ns]').astype(int) / 10**9)
+    return lines_copy.astype(float)
+
+
+def convert_to_datetime(lines: np.ndarray) -> np.ndarray:
+    """Convert the numeric values in the line segments to timestamps.
+
+    Args:
+        lines (np.ndarray): Array of line segments. Shape (N, 4) where N is the
+            number of line segments. Each line segment is defined by:
+            - s1 (Union[int, float]): Start index of the line segment.
+            - t1 (Union[int, float, pd.Timestamp, datetime]): Start timestamp.
+            - s2 (Union[int, float]): End index of the line segment.
+            - t2 (Union[int, float, pd.Timestamp, datetime]): End timestamp.
+
+    Returns:
+        np.ndarray: Line segments with timestamps converted.
+    """
+    # Create a copy of the original array to avoid modifying it
+    lines_copy = lines.copy()
+    for i in [1, 3]:
+        if isinstance(lines_copy[:, i][0], (int, float)):
+            lines_copy[:, i] = pd.to_datetime(lines_copy[:, i], unit='s')
+    return lines_copy
