@@ -4,61 +4,23 @@ __author__ = 'khanh.p.d.truong@ntnu.no'
 __date__ = '2024-08-23'
 
 
+import os
+import time
 import re
 import uuid
 from datetime import datetime, timedelta
-from typing import Union
+from typing import Union, Callable, Tuple
+import logging
 
 import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.pool import NullPool
+from watchdog.events import FileSystemEventHandler
 
-
-def extract_dt(path: str) -> str:
-    """Extract the date and time from the input path with format ending with
-    /YYYYMMDD/dphi/HHMMSS.hdf5. Output format: 'YYYYMMDD HHMMSS'
-
-    Args:
-        path (str): Input path.
-
-    Returns:
-        str: Date and time extracted from the input path.
-    """
-    # Define the regular expression pattern
-    pattern = r"/(\d{8})/dphi/(\d{6})\.hdf5$"
-
-    # Search for the pattern in the input string
-    match = re.search(pattern, path)
-
-    # Extract the matched groups
-    date_part = match.group(1)
-    time_part = match.group(2)
-
-    # Combine date and time parts
-    date_time = f"{date_part} {time_part}"
-    return date_time
-
-
-def add_subtract_dt(dt: str, x: int, format: str = '%Y%m%d %H%M%S') -> str:
-    """Add or subtract x seconds to time t having format 'YYYYMMDD HHMMSS'.
-
-    Args:
-        dt (str): Input datetime string.
-        x (int): Number of seconds to add or subtract.
-        format (str, optional): Format of the input datetime string.
-            Defaults to '%Y%m%d %H%M%S'.
-
-    Returns:
-        str: New datetime string after adding or subtracting x seconds.
-    """
-    # Convert input string to datetime object
-    input_dt = datetime.strptime(dt, format)
-    # Add x seconds to the datetime object
-    new_dt = input_dt + timedelta(seconds=x)
-    # Format the new datetime object back into the same string format
-    new_dt_str = new_dt.strftime(format)
-    return new_dt_str
+# Set up logger
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+logger = logging.getLogger(__name__)
 
 
 def create_connection_string(
@@ -149,57 +111,57 @@ def check_table_exists(
     return inspector.has_table(database_table)
 
 
-def assign_id(
-    df: pd.DataFrame,
-    id_col: str = 'id',
-) -> pd.DataFrame:
-    """Assign unique ID to each row in the data frame.
+def gen_id(n: int) -> list[str]:
+    """Generate a list of n unique IDs.
 
     Args:
-        df (pd.DataFrame): Input data frame.
-        id_col (str): Name of the ID column. Default is 'id'.
+        n (int): Number of unique IDs to generate.
 
     Returns:
-        pd.DataFrame: Data frame with unique ID assigned.
+        list[str]: List of n unique IDs.
     """
-    uuid_list = [str(uuid.uuid4()) for _ in range(len(df))]
-    df.insert(0, id_col, uuid_list)
-    return df
+    uuid_list = [str(uuid.uuid4()) for _ in range(n)]
+    return uuid_list
 
 
-def reassign_id(
-    previous_lines_id: np.ndarray[Union[str, int]],
+def match_line_id(
     current_lines_id: np.ndarray[Union[str, int]],
+    previous_lines_id: np.ndarray[Union[str, int]],
     dist_mat: np.ndarray[float],
     threshold: float
 ) -> np.ndarray[Union[str, int]]:
-    """Reassign the line ID based on the minimum distance between the previous
-    and new lines. If the distance is below the threshold, the new line is
-    assigned the ID of the previous nearest line. If the distance is above the
-    threshold, the new line ID is kept.
+    """Match the current line IDs to the previous line IDs based on the
+    distance matrix. If the distance between the new line and the previous line
+    is below the threshold, assign the previous line ID to the new line,
+    otherwise maintain the current line ID.
 
     Args:
-        previous_lines_id (np.ndarray[Union[str, int]],): Previous line IDs.
-            Shape (N,).
-        current_lines_id (np.ndarray[Union[str, int]],): Current line IDs.
+        current_lines_id (np.ndarray[Union[str, int]]): Current line IDs. Shape
+            (N,).
+        previous_lines_id (np.ndarray[Union[str, int]]): Previous line IDs.
             Shape (M,).
-        dist_mat (np.ndarray[float]): Distance matrix between the previous
-            lines and new lines. Shape (N, M)
-        threshold (float): Threshold to consider the distance as a match.
+        dist_mat (np.ndarray[float]): Distance matrix between the new lines and
+            the previous lines and. Shape (N, M).
+        threshold (float): Threshold distance for assigning the line IDs.
 
     Returns:
-        np.ndarray[Union[str, int]],: New line IDs.
+        np.ndarray[Union[str, int]]: New line IDs.
     """
     # Find the indices of the minimum distances
-    min_indices = np.argmin(dist_mat, axis=0)
-    # Find the minimum distances for each point in b
-    min_distances = np.min(dist_mat, axis=0)
+    min_indices = np.nanargmin(dist_mat, axis=1)
+
+    # Find the minimum distances for each point
+    min_distances = np.nanmin(dist_mat, axis=1)
+
     # Create a mask for distances below the threshold
-    mask = min_distances < threshold
-    # Create an array to hold the new names
-    lines_id_resigned = np.where(
+    mask = min_distances <= threshold
+
+    # Assign the previous line IDs to the new lines, where the distance is
+    # below the threshold, otherwise assign a new unique ID
+    new_lines_id = np.where(
         mask, previous_lines_id[min_indices], current_lines_id)
-    return lines_id_resigned
+
+    return new_lines_id
 
 
 def calculate_speed(lines: np.ndarray) -> Union[float, np.ndarray[float]]:
@@ -247,7 +209,15 @@ def calculate_speed(lines: np.ndarray) -> Union[float, np.ndarray[float]]:
         space_diff,
         time_diff,
         where=time_diff != 0,
-        out=np.full_like(space_diff, np.inf)
+        out=np.where(
+            time_diff == 0,
+            np.where(
+                space_diff == 0,
+                np.nan,
+                np.where(space_diff > 0, np.inf, -np.inf)
+            ),
+            np.zeros_like(space_diff)
+        )
     )
 
     # If it was a single line segment, return a float
@@ -281,10 +251,16 @@ def calculate_slope(
     speed = calculate_speed(lines)
     if isinstance(speed, float):
         if speed == 0:
+            if np.signbit(speed):  # Check if speed is -0.0
+                return -np.inf
             return np.inf
         return 1 / speed
+
     with np.errstate(divide='ignore'):
-        return np.reciprocal(speed)
+        reciprocal_speed = np.reciprocal(speed)
+        # Handle the case for arrays with -0.0
+        reciprocal_speed[np.isclose(speed, 0) & np.signbit(speed)] = -np.inf
+        return reciprocal_speed
 
 
 def reorder_coordinates(
@@ -529,3 +505,238 @@ def convert_to_datetime(lines: np.ndarray) -> np.ndarray:
         if isinstance(lines_copy[:, i][0], (int, float)):
             lines_copy[:, i] = pd.to_datetime(lines_copy[:, i], unit='s')
     return lines_copy
+
+
+def assign_id_df(
+    current_lines: pd.DataFrame,
+    previous_lines: pd.DataFrame,
+    id_col: str = 'id',
+    line_id_col: str = 'line_id',
+    s1_col: str = 's1',
+    t1_col: str = 't1',
+    s2_col: str = 's2',
+    t2_col: str = 't2',
+    threshold: float = 3,
+) -> pd.DataFrame:
+    """Assign unique ID and line ID to each line in the data frame lines.
+
+    Args:
+        current_lines (pd.DataFrame): Current lines. Must have columns s1_col,
+            t1_col, s2_col and t2_col.
+        previous_lines (pd.DataFrame): Previous lines. Must have columns
+            s1_col, t1_col, s2_col, t2_col and line_id_col.
+        id_col (str): Name of the ID column in previous_lines and to be added
+            to current_lines. Default is 'id'.
+        line_id_col (str): Name of the line ID column in previous_lines and to
+            be added to current_lines. Default is 'line_id'.
+        s1_col (str): Name of the s1 column in lines and previous_lines.
+            Default is 's1'.
+        t1_col (str): Name of the t1 column in lines and previous_lines.
+            Default is 't1'.
+        s2_col (str): Name of the s2 column in lines and previous_lines.
+            Default is 's2'.
+        t2_col (str): Name of the t2 column in lines and previous_lines.
+            Default is 't2'.
+        threshold (float): Maximum gap between the current line and the
+            previous lines to be considered as the same line. Default is 3.
+
+    Returns:
+        pd.DataFrame: new columns id_col and line_id_col are added to the lines
+            data frame.
+    """
+    # Extract the coordinates of the lines
+    lines_coords = current_lines[[s1_col, t1_col, s2_col, t2_col]].to_numpy()
+    previous_lines_coords = (
+        previous_lines[[s1_col, t1_col, s2_col, t2_col]].to_numpy())
+
+    # Calculate pairwise gap between line and the previous lines
+    lines_gaps = calculate_line_gap(lines_coords, previous_lines_coords)
+
+    # Assign unique ID and line ID to each line
+    current_lines[id_col] = gen_id(len(current_lines))
+    lines_id = match_line_id(
+        current_lines_id=current_lines[id_col].to_numpy(),
+        previous_lines_id=previous_lines[line_id_col].to_numpy(),
+        dist_mat=lines_gaps,
+        threshold=threshold,
+    )
+    current_lines[line_id_col] = lines_id
+
+    return current_lines
+
+
+def save_lines_csv(
+    lines_df: pd.DataFrame,
+    output_dir: str,
+    file_name: str
+) -> None:
+    """Save the lines data frame to a CSV file.
+
+    Args:
+        lines_df (pd.DataFrame): Data frame containing the lines.
+        output_dir (str): Path to the output directory.
+        file_name (str): Name of the output CSV file.
+    """
+    # Create the output directory if it does not exist
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Save the lines data frame to a CSV file
+    lines_df.to_csv(os.path.join(output_dir, file_name), index=False)
+
+
+# Define the event handler class
+class HDF5EventHandler(FileSystemEventHandler):
+
+    def __init__(
+        self,
+        event_thresh: int,
+        dasly_fn: Callable[[str], None]
+    ):
+        """Initialize the event handler with an event threshold.
+
+        Args:
+            event_thresh (int): Number of events to wait before running dasly.
+            dasly_fn (Callable[[str], None]): Function to run dasly. It takes
+                the path to the hdf5 file as input.
+        """
+        super().__init__()
+        self.event_thresh = event_thresh  # Set the event thresholh
+        self.event_count = 0  # Initialize the event count
+        self.last_created = None
+
+    def on_created(self, event):
+        """Event handler for file creation (copying or moving). This is for
+        testing only. Comment out when deploying.
+        """
+        if (
+            # Check if the event is a hdf5 file
+            event.src_path.endswith('.hdf5') and
+            # Ensure the file is not a duplicate (sometimes watchdog triggers
+            # the created event twice for the same file. This should be a bug
+            # and we need to work around it by storing the last created file)
+            event.src_path != self.last_created
+        ):
+            time.sleep(1)  # Wait for the file to be completely written
+            logger.info(f'New hdf5: {event.src_path}')
+            self.last_created = event.src_path  # Update the last created
+            # In case we set the batch more than 10 seconds (i.e. wait for
+            # more than one file to be created before running dasly), we need
+            # to count the number of events and run dasly only when the event
+            # count reaches the threshold
+            self.event_count += 1
+            if self.event_count >= self.event_thresh:
+                logger.info('Runing dasly...')
+                self.dasly_fn(event.src_path)
+                self.event_count = 0  # Reset the event count
+
+    def on_moved(self, event):
+        """Event handler for file moving. In integrator, when a hdf5 file is
+        completely written, it is moved from hdf5.tmp to hdf5.
+        """
+        if (
+            # Check if the event is a hdf5 file
+            event.dest_path.endswith('.hdf5') and
+            # Ensure the file is not a duplicate (sometimes watchdog triggers
+            # the created event twice for the same file. This should be a bug
+            # and we need to work around it by storing the last created file)
+            event.dest_path != self.last_created
+        ):
+            time.sleep(1)  # Wait for the file to be completely written
+            logger.info(f'New hdf5: {event.dest_path}')
+            self.last_created = event.dest_path  # Update the last created
+            # In case we set the batch more than 10 seconds (i.e. wait for
+            # more than one file to be created before running dasly), we need
+            # to count the number of events and run dasly only when the event
+            # count reaches the threshold
+            self.event_count += 1
+            if self.event_count >= self.event_thresh:
+                logger.info('Runing dasly...')
+                self.dasly_fn(event.dest_path)
+                self.event_count = 0  # Reset the event count
+
+
+def flatten_dict(
+        d: dict,
+        parent_key: str = '',
+        sep: str = '_') -> dict:
+    """Flatten a nested dictionary.
+
+    Args:
+        d (dict): Nested dictionary to flatten.
+        parent_key (str, optional): Parent key. Defaults to ''.
+        sep (str, optional): Separator. Defaults to '_'.
+
+    Returns:
+        dict: Flattened dictionary.
+    """
+    items = []
+    for k, v in d.items():
+        new_key = f'{parent_key}{sep}{k}' if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
+
+
+def get_exp_dir(file_path: str) -> str:
+    """Get the experiment directory from the HDF5 file path. The experiment
+    directory is the parent directory of date directory. For example, file_path
+    '/raid1/fsi/exps/Aastfjordbrua/20231005/dphi/082354.hdf5' would return
+    '/raid1/fsi/exps/Aastfjordbrua'.
+
+    Args:
+        file_path (str): The path to the file. The file path must end with
+            '/YYYYMMDD/dphi/HHMMSS.hdf5'.
+
+    Returns:
+        str: The experiment directory.
+    """
+    exp_dir = os.path.dirname(os.path.dirname(os.path.dirname(file_path)))
+
+    return exp_dir
+
+
+def get_date_time(file_path: str) -> Tuple[str, str]:
+    """Extract the date and time from the HDF5 file path.
+
+    Args:
+        file_path (str): The path to the HDF5 file. The file path must end with
+            '/YYYYMMDD/dphi/HHMMSS.hdf5'.
+
+    Returns:
+        Tuple[str, str]: Date and time extracted from the file
+    """
+    # Define the regular expression pattern
+    pattern = r"/(\d{8})/dphi/(\d{6})\.hdf5$"
+
+    # Search for the pattern in the input string
+    match = re.search(pattern, file_path)
+
+    # Extract the matched groups
+    date_str = match.group(1)
+    time_str = match.group(2)
+
+    return date_str, time_str
+
+
+def add_subtract_dt(dt: str, x: int, format: str = '%Y%m%d %H%M%S') -> str:
+    """Add or subtract x seconds to time t having format 'YYYYMMDD HHMMSS'.
+
+    Args:
+        dt (str): Input datetime string.
+        x (int): Number of seconds to add or subtract.
+        format (str, optional): Format of the input datetime string.
+            Defaults to '%Y%m%d %H%M%S'.
+
+    Returns:
+        str: New datetime string after adding or subtracting x seconds.
+    """
+    # Convert input string to datetime object
+    input_dt = datetime.strptime(dt, format)
+    # Add x seconds to the datetime object
+    new_dt = input_dt + timedelta(seconds=x)
+    # Format the new datetime object back into the same string format
+    new_dt_str = new_dt.strftime(format)
+    return new_dt_str

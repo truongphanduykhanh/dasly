@@ -1,0 +1,40 @@
+# input_dir should contain the following structure: /YYYYMMDD/dphi/HHMMSS.hdf5
+# input_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/test_input
+input_dir: /raid1/fsi/exps/Aastfjordbrua_from_20240508/PhaseAastfjordbrua
+start_exact_second: False  # for deployment, set to False
+integrate: False  # do not integrate the data (strain rate unit)
+
+database:
+  database_type: postgresql
+  dbapi: psycopg2
+  endpoint: cgf-postgresql.postgres.database.azure.com
+  port: 5432
+  database: aastfjordbrua
+  database_table: vehicles
+
+hdf5_file_length: 10  # length of each hdf5 file, in seconds (this is fixed)
+
+dasly:
+  batch: 60  # length of each batch, in seconds
+  batch_gap: 20  # gap between the batch, in seconds, multiple of batch_hdf5
+
+lowpass_filter_freq: 0.5
+
+decimate_t_rate: 6
+
+gaussian_smooth:
+  s1: 80
+  s2: 85
+  std_s: 10
+
+binary_threshold: 2.5e-8
+
+hough_transform:
+  speed_res: 0.5
+  length_meters: 600
+
+
+dbscan_eps_seconds: 1
+
+# this is the path to the integrator (only for testing)
+integrator_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/aastfjordbrua
