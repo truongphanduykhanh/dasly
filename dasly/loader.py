@@ -62,7 +62,7 @@ def infer_time(
         end = start + timedelta(seconds=duration)
     elif duration is None:
         duration = (end - start).seconds
-    elif start is None:
+    else:  # start is None
         start = end - timedelta(seconds=duration)
 
     return start, duration, end

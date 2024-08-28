@@ -28,7 +28,7 @@ def create_connection_string(
     database: str,
     db_username: str,
     db_password: str,
-    database_type: str = 'postgresql',
+    type: str = 'postgresql',
     dbapi: str = 'psycopg2',
     port: int = 5432
 ) -> str:
@@ -39,7 +39,7 @@ def create_connection_string(
         database (str): Database name.
         db_username (str): Database username.
         db_password (str): Database password.
-        database_type (str, optional): Database type. Defaults to 'postgresql'.
+        type (str, optional): Database type. Defaults to 'postgresql'.
         dbapi (str, optional): Database API. Defaults to 'psycopg2'.
         port (int, optional): Database port. Defaults to 5432.
 
@@ -47,7 +47,7 @@ def create_connection_string(
         str: Connection string for the SQL database.
     """
     connection_string = (
-        f'{database_type}+{dbapi}://{db_username}:{db_password}'
+        f'{type}+{dbapi}://{db_username}:{db_password}'
         + f'@{endpoint}:{port}/{database}'
     )
     return connection_string
@@ -74,7 +74,6 @@ def write_sql(
     df: pd.DataFrame,
     database_table: str,
     connection_string: str,
-    created_at: bool = True,
 ) -> None:
     """Write the data frame to SQL database.
 
@@ -82,25 +81,21 @@ def write_sql(
         df (pd.DataFrame): Data to write to the database.
         database_table (str): Table name in the database.
         connection_string (str): Connection string to the database.
-        created_at (bool, optional): Add a 'created_at' column to the data.
-            UTC timezone. Defaults to True.
     """
     # Create an engine
     engine = create_engine(connection_string, poolclass=NullPool)
     # Execute a SQL query
-    if created_at:
-        df.insert(0, 'created_at', pd.Timestamp.now(tz='UTC'))
     df.to_sql(database_table, engine, if_exists='append', index=False)
 
 
-def check_table_exists(
-    database_table: str,
+def table_exists(
+    table_name: str,
     connection_string: str
 ) -> bool:
     """Check if the table exists in the database.
 
     Args:
-        database_table (str): Table name to check.
+        table_name (str): Table name to check.
         connection_string (str): Connection string to the database.
 
     Returns:
@@ -108,7 +103,7 @@ def check_table_exists(
     """
     engine = create_engine(connection_string, poolclass=NullPool)
     inspector = inspect(engine)
-    return inspector.has_table(database_table)
+    return inspector.has_table(table_name)
 
 
 def gen_id(n: int) -> list[str]:
@@ -553,14 +548,14 @@ def assign_id_df(
     lines_gaps = calculate_line_gap(lines_coords, previous_lines_coords)
 
     # Assign unique ID and line ID to each line
-    current_lines[id_col] = gen_id(len(current_lines))
+    current_lines.insert(0, id_col, gen_id(len(current_lines)))
     lines_id = match_line_id(
         current_lines_id=current_lines[id_col].to_numpy(),
         previous_lines_id=previous_lines[line_id_col].to_numpy(),
         dist_mat=lines_gaps,
         threshold=threshold,
     )
-    current_lines[line_id_col] = lines_id
+    current_lines.insert(0, line_id_col, lines_id)
 
     return current_lines
 
@@ -604,6 +599,7 @@ class HDF5EventHandler(FileSystemEventHandler):
         self.event_thresh = event_thresh  # Set the event thresholh
         self.event_count = 0  # Initialize the event count
         self.last_created = None
+        self.dasly_fn = dasly_fn
 
     def on_created(self, event):
         """Event handler for file creation (copying or moving). This is for
@@ -617,7 +613,7 @@ class HDF5EventHandler(FileSystemEventHandler):
             # and we need to work around it by storing the last created file)
             event.src_path != self.last_created
         ):
-            time.sleep(1)  # Wait for the file to be completely written
+            time.sleep(3)  # Wait for the file to be completely written
             logger.info(f'New hdf5: {event.src_path}')
             self.last_created = event.src_path  # Update the last created
             # In case we set the batch more than 10 seconds (i.e. wait for

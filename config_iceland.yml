@@ -1,16 +1,23 @@
 # input_dir should contain the following structure: /YYYYMMDD/dphi/HHMMSS.hdf5
 input_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/test_input
-output_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/test_output
 start_exact_second: False  # for deployment, set to False
-integrate: True  # integrate the data (strain unit)
+integrate: True  # if integrate the data, get strain unit
 
+# output type: csv or db
+# If csv, output_dir is required. If database, database is required.
+output_type: db  # csv or db
+
+# output_dir in case output is saved as csv files
+output_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/test_output
+
+# database connection
 database:
-  database_type: postgresql
+  type: postgresql
   dbapi: psycopg2
   endpoint: cgf-postgresql.postgres.database.azure.com
   port: 5432
   database: aastfjordbrua
-  database_table: whales
+  table: iceland
 
 hdf5_file_length: 10  # length of each hdf5 file, in seconds (this is fixed)
 

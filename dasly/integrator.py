@@ -14,7 +14,7 @@ import yaml
 
 
 # Define the path to the YAML file
-yaml_path = 'config.yml'
+yaml_path = 'config_iceland.yml'
 
 # Open and read the YAML file
 with open(yaml_path, 'r') as file:
