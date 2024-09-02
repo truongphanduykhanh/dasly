@@ -18,6 +18,8 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.pool import NullPool
 from watchdog.events import FileSystemEventHandler
 
+from dasly.simpledas import simpleDASreader
+
 # Set up logger
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
@@ -736,3 +738,128 @@ def add_subtract_dt(dt: str, x: int, format: str = '%Y%m%d %H%M%S') -> str:
     # Format the new datetime object back into the same string format
     new_dt_str = new_dt.strftime(format)
     return new_dt_str
+
+
+def get_file_paths_deploy(
+    start_file: str = None,
+    end_file: str = None,
+    num_files: int = None,
+    file_duration: int = 10
+) -> list[str]:
+    """Get the list of file paths for deployment.
+
+    Args:
+        start_file (str, optional): The start file path, inclusive. Defaults to
+            None.
+        end_file (str, optional): The end file path, inclusive. Defaults to
+            None.
+        num_files (int, optional): Number of files to get. Defaults to None.
+        file_duration (int, optional): Duration of each file in seconds.
+            Defaults to 10.
+
+    Returns:
+        list[str]: List of file paths. This could be empty if no files are
+            found.
+    """
+    # Check if two and only two out of three are inputted
+    if (start_file is None) + (num_files is None) + (end_file is None) != 1:
+        raise ValueError('The function accepts two and only two out of '
+                         + 'three (start_file, end_file, num_files)')
+
+    if end_file is None:
+        exp_dir = get_exp_dir(start_file)
+        start_date, start_time = get_date_time(start_file)
+        start_date_time = f'{start_date} {start_time}'
+        end_date_time = add_subtract_dt(
+            start_date_time,
+            (num_files - 1) * file_duration
+        )
+        end_date, end_time = end_date_time.split(' ')
+        end_file = os.path.join(exp_dir, end_date, 'dphi', f'{end_time}.hdf5')
+
+    elif start_file is None:
+        exp_dir = get_exp_dir(end_file)
+        end_date, end_time = get_date_time(end_file)
+        end_date_time = f'{end_date} {end_time}'
+        start_date_time = add_subtract_dt(
+            end_date_time,
+            - (num_files - 1) * file_duration
+        )
+        start_date, start_time = start_date_time.split(' ')
+        start_file = os.path.join(
+            exp_dir, start_date, 'dphi', f'{start_time}.hdf5'
+        )
+
+    else:  # number_files is None
+        exp_dir = get_exp_dir(start_file)
+        start_date, start_time = get_date_time(start_file)
+        start_date_time = f'{start_date} {start_time}'
+        end_date, end_time = get_date_time(end_file)
+        end_date_time = f'{end_date} {end_time}'
+        num_files = int(
+            (datetime.strptime(end_date_time, '%Y%m%d %H%M%S')
+             - datetime.strptime(start_date_time, '%Y%m%d %H%M%S'))
+            .total_seconds() / file_duration
+        )
+
+    file_paths_gen = gen_file_paths(start_file, end_file, file_duration)
+
+    file_paths_exist, _, _ = simpleDASreader.find_DAS_files(
+        experiment_path=exp_dir,
+        start=start_date_time,
+        duration=(num_files + 1) * file_duration,
+        show_header_info=False
+    )
+
+    file_paths = list(set(file_paths_gen) & set(file_paths_exist))
+    file_paths.sort()
+
+    return file_paths
+
+
+def gen_file_paths(
+    start_file: str, end_file: str, file_duration: str = 10
+) -> list[str]:
+    """Generate the list of file paths between the start and end files.
+
+    Args:
+        start_file (str): Start file path.
+        end_file (str): End file path.
+        file_duration (int, optional): Duration of each file in seconds.
+            Defaults to 10.
+
+    Returns:
+        list[str]: List of file paths.
+    """
+    # Extract the common prefix from the file paths
+    exp_dir = get_exp_dir(start_file)
+
+    # Extract the date and time from the start and end paths
+    start_date, start_time = get_date_time(start_file)
+    start_date_time = f'{start_date} {start_time}'
+
+    end_date, end_time = get_date_time(end_file)
+    end_date_time = f'{end_date} {end_time}'
+
+    # Convert the extracted strings into datetime objects
+    start_datetime = datetime.strptime(start_date_time, '%Y%m%d %H%M%S')
+    end_datetime = datetime.strptime(end_date_time, '%Y%m%d %H%M%S')
+
+    # Generate the list of datetime objects with 10-second intervals
+    current_datetime = start_datetime
+    datetime_list = []
+
+    while current_datetime <= end_datetime:
+        datetime_list.append(current_datetime)
+        current_datetime += timedelta(seconds=file_duration)
+
+    # Convert the datetime objects back into file paths
+    file_paths = [
+        os.path.join(
+            exp_dir,
+            dt.strftime('%Y%m%d'),
+            'dphi',
+            f'{dt.strftime("%H%M%S")}.hdf5')
+        for dt in datetime_list
+    ]
+    return file_paths

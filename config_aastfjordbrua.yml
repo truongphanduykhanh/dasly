@@ -1,16 +1,34 @@
 # input_dir should contain the following structure: /YYYYMMDD/dphi/HHMMSS.hdf5
-# input_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/test_input
-input_dir: /raid1/fsi/exps/Aastfjordbrua_from_20240508/PhaseAastfjordbrua
+input_dir: /media/kptruong/yellow02/Aastfjordbrua/Aastfjordbrua/
+# input_dir: /raid1/fsi/exps/Aastfjordbrua_from_20240508/PhaseAastfjordbrua
 start_exact_second: False  # for deployment, set to False
 integrate: False  # do not integrate the data (strain rate unit)
 
+# output type: csv or db
+# If csv, output_dir is required. If database, database is required.
+output_type: db  # csv or db
+
+# output_dir in case output is saved as csv files
+output_dir: /mnt/Datastore/usr/kptruong/dasly_repo/data/test_output
+
+# database:
+#   type: postgresql
+#   dbapi: psycopg2
+#   endpoint: cgf-postgresql.postgres.database.azure.com
+#   port: 5432
+#   database: aastfjordbrua
+#   table: aastfjordbrua
+
+
 database:
-  database_type: postgresql
+  type: postgresql
   dbapi: psycopg2
-  endpoint: cgf-postgresql.postgres.database.azure.com
+  endpoint: 129.241.154.236
   port: 5432
   database: aastfjordbrua
-  database_table: vehicles
+  table: vehicles_train_optuna
+
+
 
 hdf5_file_length: 10  # length of each hdf5 file, in seconds (this is fixed)
 

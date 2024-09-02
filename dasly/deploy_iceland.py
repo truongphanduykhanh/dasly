@@ -26,7 +26,8 @@ from dasly.utils import (
     create_connection_string,
     read_sql,
     write_sql,
-    table_exists
+    table_exists,
+    get_file_paths_deploy
 )
 
 
@@ -40,27 +41,27 @@ with open(yaml_path, 'r') as file:
     params = yaml.safe_load(file)
 
 
-def dasly_core(start: str) -> pd.DataFrame:
+def dasly_core(file_path: str) -> pd.DataFrame:
     """Run the Dasly core algorithms.
 
     Args:
-        start (str): The start time of the data to load.
+        file_path (str): The path to the HDF5 file that triggers the event.
 
     Returns:
         pd.DataFrame: The DataFrame containing the detected lines.
     """
     # Load the data
     ###########################################################################
-    s_rate = 0.25
+    file_paths = get_file_paths_deploy(
+        end_file=file_path,
+        num_files=int(params['dasly']['batch'] / params['hdf5_file_length']),
+    )
+    s_rate = 4
     das = Dasly()
     das.load_data(
-        folder_path=params['input_dir'],
-        start=start,
-        duration=params['dasly']['batch'],
-        start_exact_second=params['start_exact_second'],
-        integrate=params['integrate'],
-        chIndex=np.arange(round(5000 * s_rate), round(85000 * s_rate)),
-        reset_channel_idx=False
+        file_paths=file_paths,
+        chIndex=np.arange(round(3060 * s_rate), round(100000 * s_rate)),
+        integrate=params['integrate']
     )
 
     # forward Gaussian smoothing
@@ -110,12 +111,7 @@ def dasly_pipeline_csv(file_path: str) -> None:
     # Get the experiment directory, date, and time
     date_str, time_str = get_date_time(file_path)
 
-    # Run the dasly_core
-    first_file_dt = add_subtract_dt(
-        f'{date_str} {time_str}',
-        params['hdf5_file_length'] - params['dasly']['batch']
-    )
-    lines_df = dasly_core(first_file_dt)
+    lines_df = dasly_core(file_path)
     if lines_df is None:
         return
 
@@ -165,12 +161,7 @@ def dasly_pipeline_db(file_path: str) -> None:
     # Get the experiment directory, date, and time
     date_str, time_str = get_date_time(file_path)
 
-    # Run the dasly_core
-    first_file_dt = add_subtract_dt(
-        f'{date_str} {time_str}',
-        params['hdf5_file_length'] - params['dasly']['batch']
-    )
-    lines_df = dasly_core(first_file_dt)
+    lines_df = dasly_core(file_path)
     if lines_df is None:
         return
 

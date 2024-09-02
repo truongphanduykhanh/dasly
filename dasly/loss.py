@@ -56,6 +56,8 @@ def loss_fn(
     # Add the penalty for y_true_i with zero S_y_true_i
     L += np.sum(counts == 0) * a
 
+    L = L / len(y_true)  # Normalize the loss by the number of y_true
+
     return L
 
 
@@ -84,5 +86,3 @@ def timestamp_dist(y_true_i: np.ndarray, y_pred_j: np.ndarray) -> float:
             return abs((y_true_i[0] - y_pred_j[0]).total_seconds())
     else:  # 1-dimensional case
         return abs((y_true_i - y_pred_j).total_seconds())
-
-

@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 
 from dasly.simpledas import simpleDASreader
+from dasly.utils import get_date_time
+
 
 # Set up logger
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -187,10 +189,11 @@ def get_file_paths(
 
     # Verbose
     #######################################################################
-    first_file = extract_date_time(file_paths[0])
-    last_file = extract_date_time(file_paths[-1])
-    logger.info(
-        f'{len(file_paths)} files, from {first_file} to {last_file}')
+    # first_file = get_date_time(file_paths[0])
+    # last_file = get_date_time(file_paths[-1])
+
+    # logger.info(
+    #     f'{len(file_paths)} files, from {first_file} to {last_file}')
     return file_paths
 
 
@@ -261,7 +264,7 @@ class DASLoader:
         suppress_date: bool = False,
         chIndex: Union[slice, list[int], np.ndarray] = None,
         integrate: bool = True,
-        reset_channel_idx: bool = True
+        reset_channel_idx: bool = False
     ) -> None:
         """Load data to the instance.
 
@@ -291,7 +294,7 @@ class DASLoader:
             suppress_date (bool, optional): If True, keep only time as index if
                 all the data come from the same date. Defaults to False.
             chIndex (Union[slice, list[int], np.ndarray], optional): Channel
-                index. See more at simpleDASreader. Defaults to None.
+                index. See more at simpleDASreader. Defaults to False.
             integrate (bool, optional): If True, integrate the data to get
                 strain unit. Otherwise, the data is in strain rate unit. See
                 more at simpleDASreader. Defaults to True
@@ -316,6 +319,10 @@ class DASLoader:
                 duration=duration,
                 start_exact_second=start_exact_second
             )
+        first_file = get_date_time(file_paths[0])[-1]
+        last_file = get_date_time(file_paths[-1])[-1]
+        logger.info(
+            f'{len(file_paths)} files, from {first_file} to {last_file}')
         # Load data
         signal = simpleDASreader.load_DAS_files(
             filepaths=file_paths,
