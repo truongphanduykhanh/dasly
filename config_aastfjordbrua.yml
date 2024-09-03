@@ -34,7 +34,7 @@ hdf5_file_length: 10  # length of each hdf5 file, in seconds (this is fixed)
 
 dasly:
   batch: 60  # length of each batch, in seconds
-  batch_gap: 20  # gap between the batch, in seconds, multiple of batch_hdf5
+  batch_gap: 30  # gap between the batch, in seconds, multiple of batch_hdf5
 
 lowpass_filter_freq: 0.5
 

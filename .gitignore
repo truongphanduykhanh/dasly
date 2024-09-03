@@ -96,3 +96,6 @@ test.ipynb
 *.ckpt
 /notebooks/lightning_logs
 *.pt
+
+
+nohup.out

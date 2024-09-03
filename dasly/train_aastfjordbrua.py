@@ -24,7 +24,8 @@ from dasly.utils import (
     read_sql,
     write_sql,
     table_exists,
-    get_file_paths_deploy
+    extract_elements,
+    drop_table
 )
 
 
@@ -62,15 +63,39 @@ def dasly_core(
 
     # Load the data
     ###########################################################################
-    file_paths = get_file_paths_deploy(
-        end_file=file_path,
-        num_files=int(params['dasly']['batch'] / params['hdf5_file_length']),
+
+    date, time = get_date_time(file_path)
+    start = add_subtract_dt(
+        f'{date} {time}',
+        - (params['dasly']['batch'] + params['hdf5_file_length'])
     )
+    file_paths_add, _, _ = simpleDASreader.find_DAS_files(
+        experiment_path=params['input_dir'],
+        start=start,
+        duration=params['dasly']['batch'] + 2 * params['hdf5_file_length'],
+        show_header_info=False
+    )
+    file_paths = extract_elements(
+        lst=file_paths_add,
+        num=int(params['dasly']['batch'] / params['hdf5_file_length']),
+        last_value=file_path
+    )
+
+    # channel
+    chIndex_all = np.arange(0, 800)
+    chIndex_remove1 = np.arange(0, 36)
+    chIndex_remove2 = np.arange(365, 387)
+    chIndex_remove3 = np.arange(751, 800)
+    chIndex_remove = np.concatenate((
+        chIndex_remove1, chIndex_remove2, chIndex_remove3))
+    chIndex = np.setdiff1d(chIndex_all, chIndex_remove)
 
     das = Dasly()
     das.load_data(
         file_paths=file_paths,
-        integrate=params['integrate']
+        integrate=params['integrate'],
+        chIndex=chIndex,
+        reset_channel_idx=True
     )
 
     # forward Gaussian smoothing
@@ -330,8 +355,6 @@ if __name__ == "__main__":
 
     import optuna
     from optuna.samplers import TPESampler
-    from sqlalchemy import create_engine, text
-    from sqlalchemy.pool import NullPool
 
     from dasly.simpledas import simpleDASreader
     from dasly.loss import timestamp_dist, loss_fn
@@ -343,8 +366,8 @@ if __name__ == "__main__":
     file_paths, _, _ = simpleDASreader.find_DAS_files(
         experiment_path=params['input_dir'],
         start=start,
-        # duration=3*60*60 - 1*60,  # 3 hours - 1 minute
-        duration=180,  # 3 hours - 1 minute
+        duration=3*60*60 - 1*60,  # 3 hours - 1 minute
+        # duration=60,  # 3 hours - 1 minute
         show_header_info=False
     )
 
@@ -384,20 +407,16 @@ if __name__ == "__main__":
             port=params['database']['port']
         )
 
+        if not table_exists(
+            table_name=params['database']['table'],
+            connection_string=connection_string
+        ):
+            return 1e6  # return a large loss if the table does not exist
+
         query = f'SELECT * FROM {params["database"]["table"]};'
         lines_df = read_sql(query, connection_string)
 
-        drop_query = f'DROP TABLE IF EXISTS {params["database"]["table"]};'
-
-        # Create a SQLAlchemy engine
-        engine = create_engine(connection_string, poolclass=NullPool)
-
-        # Define the raw SQL command
-        sql_command = text(drop_query)
-
-        # Execute the command
-        with engine.connect() as connection:
-            connection.execute(sql_command)
+        drop_table(params["database"]["table"], connection_string)
 
         coordinates = (
             lines_df
@@ -456,7 +475,7 @@ if __name__ == "__main__":
 
     sampler = TPESampler(seed=42)
     study = optuna.create_study(
-        study_name="my_study6",
+        study_name="my_study12",
         storage=connection_string,
         load_if_exists=False,
         direction="minimize",
@@ -466,32 +485,21 @@ if __name__ == "__main__":
     def objective(trial):
         param = {
             'lowpass_filter_freq': trial.suggest_categorical(
-                'lowpass_filter_freq', [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50]
+                'lowpass_filter_freq', [0.1, 0.2, 0.5, 1, 2, 5, 10, 20]
             ),
             'decimate_t_rate': trial.suggest_categorical(
-                'decimate_t_rate', [1, 2, 4, 5, 8, 10, 20, 25, 40, 50, 100]
+                'decimate_t_rate', [1, 2, 4, 5, 8, 10, 20, 25]
             ),
-            'gaussian_smooth_s1': trial.suggest_float(
-                'gaussian_smooth_s1', 70, 80
-            ),
-            'gaussian_smooth_s2': trial.suggest_float(
-                'gaussian_smooth_s2', 80, 90
-            ),
-            'gaussian_smooth_std_s': trial.suggest_float(
-                'gaussian_smooth_std_s', 0.05, 0.5
-            ),
+            'gaussian_smooth_s1': params['gaussian_smooth_s1'],
+            'gaussian_smooth_s2': params['gaussian_smooth_s2'],
+            'gaussian_smooth_std_s': params['gaussian_smooth_std_s'],
             'binary_threshold': trial.suggest_float(
-                'binary_threshold', 2.5e-8, 2.5e-7
+                'binary_threshold', 1e-8, 3e-8
             ),
-            'hough_transform_speed_res': trial.suggest_float(
-                'hough_transform_speed_res', 0.1, 1
-            ),
-            'hough_transform_length_meters': trial.suggest_float(
-                'hough_transform_length_meters', 400, 700
-            ),
-            'dbscan_eps_seconds': trial.suggest_float(
-                'dbscan_eps_seconds', 1, 5
-            )
+            'hough_transform_speed_res': params['hough_transform_speed_res'],
+            'hough_transform_length_meters':
+                params['hough_transform_length_meters'],
+            'dbscan_eps_seconds': params['dbscan_eps_seconds']
         }
         return calculate_loss(**param)
 

@@ -14,8 +14,9 @@ import logging
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, MetaData
 from sqlalchemy.pool import NullPool
+from sqlalchemy.ext.declarative import declarative_base
 from watchdog.events import FileSystemEventHandler
 
 from dasly.simpledas import simpleDASreader
@@ -144,6 +145,13 @@ def match_line_id(
     Returns:
         np.ndarray[Union[str, int]]: New line IDs.
     """
+    # Replace NaN values with infinity
+    # A vertical line will have nan distance with all other lines (including
+    # horizontal lines, vertical lines, one point, etc.)
+    # So we assume the distance between a vertical line and any other line is
+    # infinity.
+    dist_mat = np.nan_to_num(dist_mat, nan=np.inf)
+
     # Find the indices of the minimum distances
     min_indices = np.nanargmin(dist_mat, axis=1)
 
@@ -863,3 +871,42 @@ def gen_file_paths(
         for dt in datetime_list
     ]
     return file_paths
+
+
+def extract_elements(
+    lst: list[Union[str, int, float]],
+    num: int,
+    last_value: Union[str, int, float]
+) -> list[Union[str, int, float]]:
+    """Extract num elements from the list lst that is up to the last_value
+    (inclusive).
+
+    Args:
+        lst (list[Union[str, int, float]]): List of elements.
+        num (int): Number of elements to extract.
+        last_value (Union[str, int, float]): Value up to in the extracted
+            elements.
+
+    Returns:
+        list[Union[str, int, float]]: Extracted elements
+    """
+    idx = lst.index(last_value)
+    start_idx = max(0, idx - num + 1)
+    ext_elems = lst[start_idx:idx + 1]
+    return ext_elems
+
+
+def drop_table(table_name: str, connection_string: str) -> None:
+    """Drop a table from the database.
+
+    Args:
+        table_name (str): Name of the table to drop.
+        connection_string (str): Connection string to the database.
+    """
+    engine = create_engine(connection_string, poolclass=NullPool)
+    Base = declarative_base()
+    metadata = MetaData()
+    metadata.reflect(bind=engine)
+    table = metadata.tables[table_name]
+    if table is not None:
+        Base.metadata.drop_all(engine, [table], checkfirst=True)
