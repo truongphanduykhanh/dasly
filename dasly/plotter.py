@@ -9,6 +9,7 @@ from typing import Union
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 from matplotlib import colors
 import seaborn as sns
 sns.set_theme()
@@ -67,7 +68,8 @@ class DASPlotter:
         ylabel: str = 'Time',
         xticks_rotate: float = 0,
         yticks_rotate: float = 0,
-        colorbar: bool = True
+        colorbar: bool = True,
+        colorbar_label: str = 'Strain rate'
     ) -> None:
         """Plot heatmap.
 
@@ -143,31 +145,47 @@ class DASPlotter:
             interpolation='none',
             origin='lower'
         )
+        ax = plt.gca()
+        ax.set_xlabel(xlabel, fontweight='bold')
+        ax.set_ylabel(ylabel, fontweight='bold')
+        # Set tick labels and make them bold
+        # Use tick_params to set tick label size and weight
+        ax.tick_params(axis='x', which='major', labelsize=12)
+        ax.tick_params(axis='y', which='major', labelsize=12)
+
+        # Modify the font weight of the tick labels using FontProperties
+        for label in ax.get_xticklabels():
+            label.set_fontweight('bold')
+        for label in ax.get_yticklabels():
+            label.set_fontweight('bold')
 
         # Adjust ticks
-        #######################################################################
+        ######################################################################
         # Get the current ticks
-        current_xticks = plt.gca().get_xticks()[1:-1]
-        current_yticks = plt.gca().get_yticks()[1:-1]
+        # current_xticks = plt.gca().get_xticks()[1:-1]
+        # current_yticks = plt.gca().get_yticks()[1:-1]
 
-        # Create new tick
-        new_xticks = data.columns[current_xticks.astype(int)]
-        new_yticks = data.index[current_yticks.astype(int)]
+        # # Create new tick
+        # new_xticks = data.columns[current_xticks.astype(int)]
+        # new_yticks = data.index[current_yticks.astype(int)]
 
-        # Set the new tick
-        plt.gca().set_xticks(current_xticks)
-        plt.gca().set_xticklabels(new_xticks)
+        # # Set the new tick
+        # plt.gca().set_xticks(current_xticks)
+        # plt.gca().set_xticklabels(new_xticks)
 
-        plt.gca().set_yticks(current_yticks)
-        plt.gca().set_yticklabels(new_yticks)
+        # plt.gca().set_yticks(current_yticks)
+        # plt.gca().set_yticklabels(new_yticks)
 
-        plt.xticks(rotation=xticks_rotate)  # Rotate x-axis labels
-        plt.yticks(rotation=yticks_rotate)  # Rotate y-axis labels
+        # plt.xticks(rotation=xticks_rotate)  # Rotate x-axis labels
+        # plt.yticks(rotation=yticks_rotate)  # Rotate y-axis labels
 
-        # Axis labels
-        #######################################################################
-        plt.xlabel(xlabel)
-        plt.ylabel(ylabel)
+        # # Axis labels
+        # #######################################################################
+        # plt.xlabel(xlabel)
+        # plt.ylabel(ylabel)
+
+        ax.xaxis.set_major_locator(ticker.MaxNLocator(nbins=7))
+        ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=6))
 
         if not colorbar:
             return
@@ -177,6 +195,9 @@ class DASPlotter:
         if data_type == 'binary':  # discrete ticks
             cbar = plt.colorbar(im, ticks=[0.25, 0.75])
             cbar.ax.set_yticklabels(['0', '1'])
+            cbar.set_label(colorbar_label, fontweight='bold')
+            for label in cbar.ax.get_yticklabels():
+                label.set_fontweight('bold')
         else:
             # following code is just incase the "aspect" parameter in imshow()
             # is set, which makes the colorbar not match the plot height.
@@ -187,6 +208,9 @@ class DASPlotter:
             # Manually adjust the position of the colorbar
             cbar_ax = fig.add_axes([pos.x1 + 0.03, pos.y0, 0.03, pos.height])
             cbar = fig.colorbar(ax.images[0], cax=cbar_ax)
+            cbar.set_label(colorbar_label, fontweight='bold')
+            for label in cbar.ax.get_yticklabels():
+                label.set_fontweight('bold')
 
         # Add Hough transform lines if available
         #######################################################################
