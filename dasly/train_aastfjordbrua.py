@@ -416,7 +416,7 @@ if __name__ == "__main__":
         query = f'SELECT * FROM {params["database"]["table"]};'
         lines_df = read_sql(query, connection_string)
 
-        drop_table(params["database"]["table"], connection_string)
+        # drop_table(params["database"]["table"], connection_string)
 
         coordinates = (
             lines_df
@@ -475,7 +475,7 @@ if __name__ == "__main__":
 
     sampler = TPESampler(seed=42)
     study = optuna.create_study(
-        study_name="my_study15",
+        study_name="my_study33",
         storage=connection_string,
         load_if_exists=False,
         direction="minimize",
@@ -483,19 +483,31 @@ if __name__ == "__main__":
     )
 
     def objective(trial):
+        # param = {
+        #     'lowpass_filter_freq': trial.suggest_categorical(
+        #         'lowpass_filter_freq', [0.1, 0.2, 0.5, 1, 2, 5, 10, 20]
+        #     ),
+        #     'decimate_t_rate': trial.suggest_categorical(
+        #         'decimate_t_rate', [1, 2, 4, 5, 8, 10, 20, 25]
+        #     ),
+        #     'gaussian_smooth_s1': params['gaussian_smooth']['s1'],
+        #     'gaussian_smooth_s2': params['gaussian_smooth']['s2'],
+        #     'gaussian_smooth_std_s': params['gaussian_smooth']['std_s'],
+        #     'binary_threshold': trial.suggest_float(
+        #         'binary_threshold', 1e-8, 3e-8
+        #     ),
+        #     'hough_transform_speed_res': params['hough_transform']['speed_res'],
+        #     'hough_transform_length_meters':
+        #         params['hough_transform']['length_meters'],
+        #     'dbscan_eps_seconds': params['dbscan_eps_seconds']
+        # }
         param = {
-            'lowpass_filter_freq': trial.suggest_categorical(
-                'lowpass_filter_freq', [0.1, 0.2, 0.5, 1, 2, 5, 10, 20]
-            ),
-            'decimate_t_rate': trial.suggest_categorical(
-                'decimate_t_rate', [1, 2, 4, 5, 8, 10, 20, 25]
-            ),
+            'lowpass_filter_freq': params['lowpass_filter_freq'],
+            'decimate_t_rate': params['decimate_t_rate'],
             'gaussian_smooth_s1': params['gaussian_smooth']['s1'],
             'gaussian_smooth_s2': params['gaussian_smooth']['s2'],
             'gaussian_smooth_std_s': params['gaussian_smooth']['std_s'],
-            'binary_threshold': trial.suggest_float(
-                'binary_threshold', 1e-8, 3e-8
-            ),
+            'binary_threshold': params['binary_threshold'],
             'hough_transform_speed_res': params['hough_transform']['speed_res'],
             'hough_transform_length_meters':
                 params['hough_transform']['length_meters'],
@@ -503,4 +515,4 @@ if __name__ == "__main__":
         }
         return calculate_loss(**param)
 
-    study.optimize(objective, n_trials=100)
+    study.optimize(objective, n_trials=1)

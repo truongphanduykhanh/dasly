@@ -18,6 +18,7 @@ from sqlalchemy import create_engine, inspect, MetaData
 from sqlalchemy.pool import NullPool
 from sqlalchemy.ext.declarative import declarative_base
 from watchdog.events import FileSystemEventHandler
+from zoneinfo import ZoneInfo
 
 from dasly.simpledas import simpleDASreader
 
@@ -910,3 +911,302 @@ def drop_table(table_name: str, connection_string: str) -> None:
     table = metadata.tables[table_name]
     if table is not None:
         Base.metadata.drop_all(engine, [table], checkfirst=True)
+
+
+def extract_section(
+    data: np.ndarray,  # shape (m, n)
+    col_idx: np.ndarray,  # shape (n', )
+    row_idx: np.ndarray,  # shape (n', )
+    width: int
+) -> np.ndarray:
+    """Extract a windows section of the data.
+
+    Args:
+        data (np.ndarray): 2D data array.
+        col_idx (np.ndarray): Column indices to extract.
+        row_idx (np.ndarray): Corresponding middle row indices to extract.
+        width (int): Half-width of the section from the middle row indices.
+
+    Returns:
+        np.ndarray: Extracted section of the data. Shape (2*t + 1, n').
+    """
+    # Generate the row index ranges
+    row_range = np.arange(-width, width + 1)
+    row_indices = row_idx[:, None] + row_range
+
+    # Clip the indices to ensure they are within the valid range
+    row_indices = np.clip(
+        row_indices, 0, data.shape[0] - 1)
+
+    # Use advanced indexing to extract the data
+    result = data[row_indices, col_idx[:, None]]
+
+    # Transpose the result to get the desired shape (2*t + 1, m)
+    result = result.T
+    return result
+
+
+def round_datetime(
+    datetimes: np.ndarray[datetime],
+    t_rate: float
+) -> np.ndarray[datetime]:
+    """Round datetime values to the nearest round factor.
+
+    Args:
+        datetimes (np.ndarray[datetime]): Array of datetime values.
+        t_rate (float): Temporal rate.
+
+    Returns:
+        np.ndarray[datetime]: Rounded datetime values.
+    """
+    # Convert datetimes to timestamps (seconds since epoch)
+    timestamps = np.array(
+        [dt.replace(tzinfo=ZoneInfo("Europe/Berlin")).timestamp()
+         for dt in datetimes]
+    )
+
+    # Round the timestamps to the nearest precision
+    rounded_timestamps = np.round(timestamps * t_rate) / t_rate
+
+    # Convert the rounded timestamps back to datetime objects
+    rounded_datetimes = np.array(
+        [datetime.fromtimestamp(ts) for ts in rounded_timestamps]
+    )
+    return rounded_datetimes
+
+
+def to_datetime(
+        dt: Union[datetime, str],
+        fmt: str = '%Y%m%d %H%M%S'
+) -> datetime:
+    """Convert a string to a datetime object.
+
+    Args:
+        dt (Union[datetime, str]): Input datetime.
+        fmt (str, optional): Format of the datetime string. Defaults to
+            '%Y%m%d %H%M%S'.
+
+    Returns:
+        datetime: Datetime object.
+    """
+    if isinstance(dt, str):
+        dt = datetime.strptime(dt, fmt)
+    return dt
+
+
+def round_space_idx(
+    space_idx: np.ndarray[int],
+    s_rate: float
+) -> np.ndarray[int]:
+    """Round spatial indices to the nearest available spatial indices in the
+    data.
+
+    Args:
+        space_idx (np.ndarray[int]): Spatial indices.
+        s_rate (float): Spatial rate.
+
+    Returns:
+        np.ndarray[int]: Rounded spatial indices.
+    """
+    result = np.round(space_idx * s_rate) / s_rate
+    return result.astype(int)
+
+
+def interpolate_datetime(
+    start: Union[str, datetime],
+    end: Union[str, datetime],
+    fmt: str = '%Y%m%d %H%M%S',
+    num_points: int = None,
+) -> np.ndarray[datetime]:
+    """Interpolate datetime values between start and end.
+
+    Args:
+        start (Union[str, datetime]): Start datetime.
+        end (Union[str, datetime]): End datetime.
+        fmt (str, optional): Format of the datetime strings. Defaults to
+            '%Y%m%d %H%M%S'.
+        num_points (int, optional): Number of points to interpolate between
+            start and end (inclusive). Defaults to None.
+
+    Returns:
+        np.ndarray[datetime]: Interpolated datetime values.
+    """
+    if isinstance(start, str):
+        start = datetime.strptime(start, fmt)
+    if isinstance(end, str):
+        end = datetime.strptime(end, fmt)
+
+    start = pd.Timestamp(start)
+    end = pd.Timestamp(end)
+
+    start_aware = start.replace(tzinfo=ZoneInfo("Europe/Berlin"))
+    end_aware = end.replace(tzinfo=ZoneInfo("Europe/Berlin"))
+
+    start_ts = start_aware.timestamp()
+    end_ts = end_aware.timestamp()
+
+    # Generate an array of evenly spaced points between start and end
+    interpolated_timestamps = np.linspace(start_ts, end_ts, num_points)
+
+    # Use numpy's vectorize to convert the array of timestamps back to datetime
+    convert_to_datetime = np.vectorize(datetime.fromtimestamp)
+    interpolated_datetimes = convert_to_datetime(interpolated_timestamps)
+
+    return interpolated_datetimes
+
+
+def gen_val_sym(gap: float, lim: float) -> np.ndarray[float]:
+    """Generate an array of values with a gap of gap between them,
+    symmetrically around 0. The minimum is -lim, the maximum is lim, and the
+    middle value is 0 (excluding -lim and lim).
+
+    Args:
+        gap (float): The gap between consecutive values.
+        lim (float): The absolute maximum value.
+
+    Returns:
+        np.ndarray: A list of values.
+    """
+    positive_values = np.arange(0, lim + gap, gap)
+    negative_values = -np.flip(positive_values[1:])
+
+    # Combine negative and positive parts, with 0 in the middle
+    values = np.concatenate((negative_values, positive_values))
+
+    return values
+
+
+def get_dt_windows(
+    s1: int,
+    t1: Union[str, datetime],
+    s2: int,
+    t2: Union[str, datetime],
+    t_rate: float,
+    s_rate: float,
+    window: float,
+) -> np.ndarray[datetime]:
+    """Extract a spatio-temporal section indices of the data.
+
+    Args:
+        s1 (int): Start spatial index.
+        t1 (Union[str, datetime]): Start timestamp.
+        s2 (int): End spatial index.
+        t2 (Union[str, datetime]): End timestamp.
+        t_rate (float): Temporal rate.
+        s_rate (float): Spatial rate.
+        window (float): Half-width of the section in seconds.
+
+    Returns:
+        np.ndarray[datetime]: Extracted section of the data.
+    """
+    # Convert the timestamps to datetime objects
+    t1 = to_datetime(t1)
+    t2 = to_datetime(t2)
+
+    # Round the spatial and temporal indices to the nearest integer and
+    # timestamp that are available in the data
+    s1, s2 = round_space_idx(np.array([s1, s2]), s_rate=s_rate)
+    t1, t2 = round_datetime(np.array([t1, t2]), t_rate=t_rate)
+
+    # Interpolate the datetime values between t1 and t2
+    datetime_interpolate = interpolate_datetime(
+        start=t1,
+        end=t2,
+        num_points=int(abs(s1 - s2) * s_rate + 1)
+    )
+
+    # Round the interpolated datetime values to the nearest round factor
+    datetime_interpolate = round_datetime(
+        datetimes=datetime_interpolate,
+        t_rate=t_rate
+    )
+
+    # Generate the symmetric values around 0
+    second_deltas = gen_val_sym(gap=1 / t_rate, lim=window / 2)
+
+    # Generate the shifted datetime values
+    time_deltas = np.array(
+        [timedelta(seconds=shift) for shift in second_deltas]
+    )
+
+    # Generate the datetime windows
+    dt_windows = datetime_interpolate[:, np.newaxis] + time_deltas
+
+    return dt_windows
+
+
+def extract_section_spacetime(
+    s1: int,
+    t1: Union[str, datetime],
+    s2: int,
+    t2: Union[str, datetime],
+    t_rate: float,
+    s_rate: float,
+    window: float,
+    data: pd.DataFrame,
+) -> np.ndarray[int]:
+    """Extract a spatio-temporal section indices of the data.
+
+    Args:
+        s1 (int): Start spatial index.
+        t1 (Union[str, datetime]): Start timestamp.
+        s2 (int): End spatial index.
+        t2 (Union[str, datetime]): End timestamp.
+        t_rate (float): Temporal rate.
+        s_rate (float): Spatial rate.
+        window (float): Half-width of the section in seconds.
+        data (pd.DataFrame): Data frame containing the timestamps.
+
+    Returns:
+        np.ndarray[int]: Extracted section of the data.
+    """
+    # Convert the timestamps to datetime objects
+    t1 = to_datetime(t1)
+    t2 = to_datetime(t2)
+
+    # Round the spatial and temporal indices to the nearest integer and
+    # timestamp that are available in the data
+    s1, s2 = round_space_idx(np.array([s1, s2]), s_rate=s_rate)
+    t1, t2 = round_datetime(np.array([t1, t2]), t_rate=t_rate)
+
+    # Interpolate the datetime values between s1 and s2
+    if s1 <= s2:
+        col_idx = np.arange(s1, s2 + 1 / s_rate, 1 / s_rate)
+    else:
+        col_idx = np.arange(s1, s2 - (1 / s_rate), -(1 / s_rate))
+    col_idx = np.clip(col_idx, data.columns[0], data.columns[-1])
+    col_idx = col_idx * s_rate
+    col_idx = col_idx.astype(int)
+
+    # Interpolate the datetime values between t1 and t2
+    datetime_interpolate = interpolate_datetime(
+        start=t1,
+        end=t2,
+        num_points=int(abs(s1 - s2) * s_rate + 1)
+    )
+
+    # Round the interpolated datetime values to the nearest round factor
+    datetime_interpolate = round_datetime(
+        datetimes=datetime_interpolate,
+        t_rate=t_rate
+    )
+
+    # Generate the symmetric values around 0
+    deltas = datetime_interpolate - data.index[0].to_pydatetime()
+    deltas_seconds = np.vectorize(lambda x: x.total_seconds())(deltas)
+    dt_idx_int = (deltas_seconds * t_rate).astype(int)
+
+    width = int(round(window / 2 * t_rate))
+    idx_int_span = np.arange(-width, width + 1)
+    row_indices = dt_idx_int[:, None] + idx_int_span
+
+    # Clip the indices to ensure they are within the valid range
+    row_indices = np.clip(
+        row_indices, 0, data.shape[0] - 1)
+
+    # Use advanced indexing to extract the data
+    result = data.to_numpy()[row_indices, col_idx[:, None]]
+
+    # Transpose the result to get the desired shape (2*t + 1, m)
+    result = result.T
+    return result

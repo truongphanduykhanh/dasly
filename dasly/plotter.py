@@ -162,30 +162,30 @@ class DASPlotter:
         # Adjust ticks
         ######################################################################
         # Get the current ticks
-        # current_xticks = plt.gca().get_xticks()[1:-1]
-        # current_yticks = plt.gca().get_yticks()[1:-1]
+        current_xticks = plt.gca().get_xticks()[1:-1]
+        current_yticks = plt.gca().get_yticks()[1:-1]
 
-        # # Create new tick
-        # new_xticks = data.columns[current_xticks.astype(int)]
-        # new_yticks = data.index[current_yticks.astype(int)]
+        # Create new tick
+        new_xticks = data.columns[current_xticks.astype(int)]
+        new_yticks = data.index[current_yticks.astype(int)]
 
-        # # Set the new tick
-        # plt.gca().set_xticks(current_xticks)
-        # plt.gca().set_xticklabels(new_xticks)
+        # Set the new tick
+        plt.gca().set_xticks(current_xticks)
+        plt.gca().set_xticklabels(new_xticks)
 
-        # plt.gca().set_yticks(current_yticks)
-        # plt.gca().set_yticklabels(new_yticks)
+        plt.gca().set_yticks(current_yticks)
+        plt.gca().set_yticklabels(new_yticks)
 
-        # plt.xticks(rotation=xticks_rotate)  # Rotate x-axis labels
-        # plt.yticks(rotation=yticks_rotate)  # Rotate y-axis labels
+        plt.xticks(rotation=xticks_rotate)  # Rotate x-axis labels
+        plt.yticks(rotation=yticks_rotate)  # Rotate y-axis labels
 
-        # # Axis labels
-        # #######################################################################
-        # plt.xlabel(xlabel)
-        # plt.ylabel(ylabel)
+        # Axis labels
+        #######################################################################
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
 
-        ax.xaxis.set_major_locator(ticker.MaxNLocator(nbins=7))
-        ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=6))
+        # ax.xaxis.set_major_locator(ticker.MaxNLocator(nbins=7))
+        # ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=6))
 
         if not colorbar:
             return

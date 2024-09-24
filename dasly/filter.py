@@ -654,7 +654,7 @@ class DASFilter:
         )
 
         # Compute the FFT for the extracted section
-        self.fft(
+        return self.fft(
             data=section,
             agg_func=agg_func,
             flim=flim,
